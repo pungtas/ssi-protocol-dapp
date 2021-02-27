@@ -65,3 +65,6 @@ Generic react hooks to interact with token program:
 
 * home - main page for your app
 * faucet - airdrops SOL on Testnet and Devnet
+
+Transparent but trustworthy.
+Multichain integration accross a bridge.

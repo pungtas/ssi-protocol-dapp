@@ -19,7 +19,7 @@ export const AppBar = (props: { left?: JSX.Element; right?: JSX.Element }) => {
           type="text"
           size="large"
           allowWalletChange={true}
-          style={{ color: "#2abdd2" }}
+          style={{ color: "#e6c422" }}
         />
       )}
       <Popover

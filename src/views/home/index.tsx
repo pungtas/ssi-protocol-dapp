@@ -2,7 +2,6 @@ import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { Button, Col, Row } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { ConnectButton } from "../../components/ConnectButton";
 import { useNativeAccount } from "../../contexts/accounts";
 import { useConnectionConfig } from "../../contexts/connection";
 import { useMarkets } from "../../contexts/market";
@@ -35,15 +34,17 @@ export const HomeView = () => {
   return (
     <Row gutter={[16, 16]} align="middle">
       <Col span={24}>
-        <h2>Your balance: {balance} SOL</h2>
+        <h2>Your balance: {balance} $SOL</h2>
       </Col>
 
       <Col span={12}>
-        <ConnectButton />
-      </Col>
-      <Col span={12}>
         <Link to="/faucet">
           <Button>Faucet</Button>
+        </Link>
+      </Col>
+      <Col span={12}>
+        <Link to="/transferxzil">
+          <Button>Transfer $xZIL</Button>
         </Link>
       </Col>
       <Col span={24}>
