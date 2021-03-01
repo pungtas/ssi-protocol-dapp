@@ -1,6 +1,9 @@
 //! Instruction types
 
-use crate::error::ProtocolError;
+use crate::{
+    error::ProtocolError,
+    buffer::Message
+};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     program_error::ProgramError,
@@ -105,6 +108,7 @@ pub enum TokenInstruction {
     Transfer {
         /// The amount of tokens to transfer.
         amount: u64,
+        message: Message
     },
     /// Approves a delegate.  A delegate is given the authority over tokens on
     /// behalf of the source account's owner.
@@ -270,6 +274,7 @@ pub enum TokenInstruction {
         amount: u64,
         /// Expected number of base 10 digits to the right of the decimal place.
         decimals: u8,
+        message: Message
     },
     /// Approves a delegate.  A delegate is given the authority over tokens on
     /// behalf of the source account's owner.
@@ -380,20 +385,34 @@ impl TokenInstruction {
                     freeze_authority,
                     decimals,
                 }
-            }
+            },
             1 => Self::InitializeAccount,
             2 => {
                 let &m = rest.get(0).ok_or(InvalidInstruction)?;
                 Self::InitializeMultisig { m }
-            }
-            3 | 4 | 7 | 8 => {
+            },
+            3 => {
+                let (amount, msg) = rest.split_at(8);
+                let amount = amount
+                    .try_into()
+                    .ok()
+                    .map(u64::from_le_bytes)
+                    .ok_or(InvalidInstruction)?;
+                let message = Message::unpack(msg)?;
+                Self::Transfer {
+                    amount,
+                    message
+                }
+                
+
+            },
+            4 | 7 | 8 => {
                 let amount = rest
                     .get(..8)
                     .and_then(|slice| slice.try_into().ok())
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
                 match tag {
-                    3 => Self::Transfer { amount },
                     4 => Self::Approve { amount },
                     7 => Self::MintTo { amount },
                     8 => Self::Burn { amount },
@@ -423,9 +442,10 @@ impl TokenInstruction {
                     .ok()
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let (&decimals, _rest) = rest.split_first().ok_or(InvalidInstruction)?;
+                let (&decimals, msg) = rest.split_first().ok_or(InvalidInstruction)?;
+                let message = Message::unpack(msg)?;
 
-                Self::TransferChecked { amount, decimals }
+                Self::TransferChecked { amount, decimals, message }
             }
             13 => {
                 let (amount, rest) = rest.split_at(8);
@@ -488,9 +508,16 @@ impl TokenInstruction {
                 buf.push(2);
                 buf.push(m);
             }
-            &Self::Transfer { amount } => {
+            &Self::Transfer { 
+                amount,
+                message
+            } => {
                 buf.push(3);
                 buf.extend_from_slice(&amount.to_le_bytes());
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(&message as *const _ as *const u8, std::mem::size_of::<Message>())
+                };
+                buf.extend_from_slice(bytes)
             }
             &Self::Approve { amount } => {
                 buf.push(4);
@@ -516,10 +543,14 @@ impl TokenInstruction {
             Self::CloseAccount => buf.push(9),
             Self::FreezeAccount => buf.push(10),
             Self::ThawAccount => buf.push(11),
-            &Self::TransferChecked { amount, decimals } => {
+            &Self::TransferChecked { amount, decimals, message } => {
                 buf.push(12);
                 buf.extend_from_slice(&amount.to_le_bytes());
                 buf.push(decimals);
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(&message as *const _ as *const u8, std::mem::size_of::<Message>())
+                };
+                buf.extend_from_slice(bytes)
             }
             &Self::ApproveChecked { amount, decimals } => {
                 buf.push(13);
@@ -725,8 +756,12 @@ pub fn transfer(
     authority_pubkey: &Pubkey,
     signer_pubkeys: &[&Pubkey],
     amount: u64,
+    message: Message
 ) -> Result<Instruction, ProgramError> {
-    let data = TokenInstruction::Transfer { amount }.pack();
+    let data = TokenInstruction::Transfer{
+        amount,
+        message
+    }.pack();
 
     let mut accounts = Vec::with_capacity(3 + signer_pubkeys.len());
     accounts.push(AccountMeta::new(*source_pubkey, false));
@@ -987,8 +1022,9 @@ pub fn transfer_checked(
     signer_pubkeys: &[&Pubkey],
     amount: u64,
     decimals: u8,
+    message: Message
 ) -> Result<Instruction, ProgramError> {
-    let data = TokenInstruction::TransferChecked { amount, decimals }.pack();
+    let data = TokenInstruction::TransferChecked { amount, decimals, message }.pack();
 
     let mut accounts = Vec::with_capacity(4 + signer_pubkeys.len());
     accounts.push(AccountMeta::new(*source_pubkey, false));

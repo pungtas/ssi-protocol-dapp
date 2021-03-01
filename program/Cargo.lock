@@ -4504,6 +4504,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "num_enum",
+ "rand_core 0.5.1",
  "solana-program",
  "solana-program-test",
  "solana-sdk",

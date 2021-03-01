@@ -5,6 +5,10 @@ use crate::{
     error::ProtocolError,
     instruction::{is_valid_signer_index, AuthorityType, TokenInstruction, MAX_SIGNERS},
     state::{Account, AccountState, Mint, Multisig},
+    buffer::{
+        Message,
+        MessageBuffer,
+    },
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -23,39 +27,15 @@ use solana_program::{
 /// Program state handler.
 pub struct Processor {}
 impl Processor {
-    /*for the message
-    pub fn process_instruction(
-        _: &Pubkey,
-        accounts: &[AccountInfo],
-        instruction: &[u8]
-    ) -> ProgramResult {
-        if accounts.len() == 0 {
-            Err(MessageError::NoAccountsPassed)?
-        }
-        if accounts.len() == 1 {
-            Err(MessageError::QueueNotPassed)?
-        }
-        if accounts.len() > 2 {
-            Err(MessageError::ExtraAccountsPassed)?
-        }
-        let signer = &accounts[0];
-        let queue = &accounts[1];
-        if !signer.is_signer {
-            Err(MessageError::SenderDidNotSign)?;
-        }
-        let message = Message::unpack(instruction)?;
-        let mut queue_ref = queue.try_borrow_mut_data()?;
-        let message_buffer = MessageBuffer::unpack(&mut *queue_ref)?;
-    
-        message_buffer.append(&message);
-        Ok(())
-    }
-    */
     /// Processes an [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
         let instruction = TokenInstruction::unpack(instruction_data)?;
 
         match instruction {
+            TokenInstruction::Transfer { amount, message } => {
+                msg!("Instruction: Transfer");
+                Self::process_transfer(program_id, accounts, amount, None, message)
+            }
             TokenInstruction::InitializeMint {
                 decimals,
                 mint_authority,
@@ -75,10 +55,6 @@ impl Processor {
             TokenInstruction::InitializeMultisig { m } => {
                 msg!("Instruction: InitializeMultisig");
                 Self::process_initialize_multisig(accounts, m)
-            }
-            TokenInstruction::Transfer { amount } => {
-                msg!("Instruction: Transfer");
-                Self::process_transfer(program_id, accounts, amount, None)
             }
             TokenInstruction::Approve { amount } => {
                 msg!("Instruction: Approve");
@@ -115,9 +91,9 @@ impl Processor {
                 msg!("Instruction: FreezeAccount");
                 Self::process_toggle_freeze_account(program_id, accounts, false)
             }
-            TokenInstruction::TransferChecked { amount, decimals } => {
+            TokenInstruction::TransferChecked { amount, decimals, message } => {
                 msg!("Instruction: TransferChecked");
-                Self::process_transfer(program_id, accounts, amount, Some(decimals))
+                Self::process_transfer(program_id, accounts, amount, Some(decimals), message)
             }
             TokenInstruction::ApproveChecked { amount, decimals } => {
                 msg!("Instruction: ApproveChecked");
@@ -133,7 +109,132 @@ impl Processor {
             }
         }
     }
+    /// Processes a [Transfer](enum.TokenInstruction.html) instruction.
+    pub fn process_transfer(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        expected_decimals: Option<u8>,
+        message: Message
+    ) -> ProgramResult {
+        if accounts.len() == 0 {
+            Err(ProtocolError::NoAccountsPassed)?
+        }
+        if accounts.len() == 1 {
+            Err(ProtocolError::QueueNotPassed)?
+        }
+        if accounts.len() > 2 {
+            Err(ProtocolError::ExtraAccountsPassed)?
+        }        
 
+        let account_info_iter = &mut accounts.iter();
+
+        let source_account_info = next_account_info(account_info_iter)?;
+        if !source_account_info.is_signer {
+            Err(ProtocolError::SenderDidNotSign)?;
+        }
+
+        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
+            Some((next_account_info(account_info_iter)?, expected_decimals))
+        } else {
+            None
+        };
+
+        let dest_account_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        
+        let mut queue_ref = dest_account_info.try_borrow_mut_data()?;
+        let message_buffer = MessageBuffer::unpack(&mut *queue_ref)?;
+        message_buffer.append(&message);
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
+
+        if source_account.is_frozen() || dest_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+        if source_account.amount < amount {
+            return Err(ProtocolError::InsufficientFunds.into());
+        }
+        if source_account.mint != dest_account.mint {
+            return Err(ProtocolError::MintMismatch.into());
+        }
+
+        if let Some((mint_info, expected_decimals)) = expected_mint_info {
+            if source_account.mint != *mint_info.key {
+                return Err(ProtocolError::MintMismatch.into());
+            }
+
+            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
+            if expected_decimals != mint.decimals {
+                return Err(ProtocolError::MintDecimalsMismatch.into());
+            }
+        }
+
+        let self_transfer = source_account_info.key == dest_account_info.key;
+
+        match source_account.delegate {
+            COption::Some(ref delegate) if authority_info.key == delegate => {
+                Self::validate_owner(
+                    program_id,
+                    delegate,
+                    authority_info,
+                    account_info_iter.as_slice(),
+                )?;
+                if source_account.delegated_amount < amount {
+                    return Err(ProtocolError::InsufficientFunds.into());
+                }
+                if !self_transfer {
+                    source_account.delegated_amount = source_account
+                        .delegated_amount
+                        .checked_sub(amount)
+                        .ok_or(ProtocolError::Overflow)?;
+                    if source_account.delegated_amount == 0 {
+                        source_account.delegate = COption::None;
+                    }
+                }
+            }
+            _ => Self::validate_owner(
+                program_id,
+                &source_account.owner,
+                authority_info,
+                account_info_iter.as_slice(),
+            )?,
+        };
+
+        // This check MUST occur just before the amounts are manipulated
+        // to ensure self-transfers are fully validated
+        if self_transfer {
+            return Ok(());
+        }
+
+        source_account.amount = source_account
+            .amount
+            .checked_sub(amount)
+            .ok_or(ProtocolError::Overflow)?;
+        dest_account.amount = dest_account
+            .amount
+            .checked_add(amount)
+            .ok_or(ProtocolError::Overflow)?;
+
+        if source_account.is_native() {
+            let source_starting_lamports = source_account_info.lamports();
+            **source_account_info.lamports.borrow_mut() = source_starting_lamports
+                .checked_sub(amount)
+                .ok_or(ProtocolError::Overflow)?;
+
+            let dest_starting_lamports = dest_account_info.lamports();
+            **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
+                .checked_add(amount)
+                .ok_or(ProtocolError::Overflow)?;
+        }
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+    
     /// Processes an [InitializeMint](enum.TokenInstruction.html) instruction.
     pub fn process_initialize_mint(
         accounts: &[AccountInfo],
@@ -257,114 +358,6 @@ impl Processor {
         multisig.is_initialized = true;
 
         Multisig::pack(multisig, &mut multisig_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [Transfer](enum.TokenInstruction.html) instruction.
-    pub fn process_transfer(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        amount: u64,
-        expected_decimals: Option<u8>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-
-        let source_account_info = next_account_info(account_info_iter)?;
-
-        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
-            Some((next_account_info(account_info_iter)?, expected_decimals))
-        } else {
-            None
-        };
-
-        let dest_account_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
-
-        if source_account.is_frozen() || dest_account.is_frozen() {
-            return Err(ProtocolError::AccountFrozen.into());
-        }
-        if source_account.amount < amount {
-            return Err(ProtocolError::InsufficientFunds.into());
-        }
-        if source_account.mint != dest_account.mint {
-            return Err(ProtocolError::MintMismatch.into());
-        }
-
-        if let Some((mint_info, expected_decimals)) = expected_mint_info {
-            if source_account.mint != *mint_info.key {
-                return Err(ProtocolError::MintMismatch.into());
-            }
-
-            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
-            if expected_decimals != mint.decimals {
-                return Err(ProtocolError::MintDecimalsMismatch.into());
-            }
-        }
-
-        let self_transfer = source_account_info.key == dest_account_info.key;
-
-        match source_account.delegate {
-            COption::Some(ref delegate) if authority_info.key == delegate => {
-                Self::validate_owner(
-                    program_id,
-                    delegate,
-                    authority_info,
-                    account_info_iter.as_slice(),
-                )?;
-                if source_account.delegated_amount < amount {
-                    return Err(ProtocolError::InsufficientFunds.into());
-                }
-                if !self_transfer {
-                    source_account.delegated_amount = source_account
-                        .delegated_amount
-                        .checked_sub(amount)
-                        .ok_or(ProtocolError::Overflow)?;
-                    if source_account.delegated_amount == 0 {
-                        source_account.delegate = COption::None;
-                    }
-                }
-            }
-            _ => Self::validate_owner(
-                program_id,
-                &source_account.owner,
-                authority_info,
-                account_info_iter.as_slice(),
-            )?,
-        };
-
-        // This check MUST occur just before the amounts are manipulated
-        // to ensure self-transfers are fully validated
-        if self_transfer {
-            return Ok(());
-        }
-
-        source_account.amount = source_account
-            .amount
-            .checked_sub(amount)
-            .ok_or(ProtocolError::Overflow)?;
-        dest_account.amount = dest_account
-            .amount
-            .checked_add(amount)
-            .ok_or(ProtocolError::Overflow)?;
-
-        if source_account.is_native() {
-            let source_starting_lamports = source_account_info.lamports();
-            **source_account_info.lamports.borrow_mut() = source_starting_lamports
-                .checked_sub(amount)
-                .ok_or(ProtocolError::Overflow)?;
-
-            let dest_starting_lamports = dest_account_info.lamports();
-            **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
-                .checked_add(amount)
-                .ok_or(ProtocolError::Overflow)?;
-        }
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
 
         Ok(())
     }
