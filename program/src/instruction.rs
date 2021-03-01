@@ -1,6 +1,6 @@
 //! Instruction types
 
-use crate::error::TokenError;
+use crate::error::ProtocolError;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     program_error::ProgramError,
@@ -367,7 +367,7 @@ pub enum TokenInstruction {
 impl TokenInstruction {
     /// Unpacks a byte buffer into a [TokenInstruction](enum.TokenInstruction.html).
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        use TokenError::InvalidInstruction;
+        use ProtocolError::InvalidInstruction;
 
         let (&tag, rest) = input.split_first().ok_or(InvalidInstruction)?;
         Ok(match tag {
@@ -465,7 +465,7 @@ impl TokenInstruction {
                 Self::InitializeAccount2 { owner }
             }
 
-            _ => return Err(TokenError::InvalidInstruction.into()),
+            _ => return Err(ProtocolError::InvalidInstruction.into()),
         })
     }
 
@@ -550,7 +550,7 @@ impl TokenInstruction {
             let pk = Pubkey::new(key);
             Ok((pk, rest))
         } else {
-            Err(TokenError::InvalidInstruction.into())
+            Err(ProtocolError::InvalidInstruction.into())
         }
     }
 
@@ -562,7 +562,7 @@ impl TokenInstruction {
                 let pk = Pubkey::new(key);
                 Ok((COption::Some(pk), rest))
             }
-            _ => Err(TokenError::InvalidInstruction.into()),
+            _ => Err(ProtocolError::InvalidInstruction.into()),
         }
     }
 
@@ -607,7 +607,7 @@ impl AuthorityType {
             1 => Ok(AuthorityType::FreezeAccount),
             2 => Ok(AuthorityType::AccountOwner),
             3 => Ok(AuthorityType::CloseAccount),
-            _ => Err(TokenError::InvalidInstruction.into()),
+            _ => Err(ProtocolError::InvalidInstruction.into()),
         }
     }
 }

@@ -44,7 +44,7 @@ export const HomeView = () => {
       </Col>
       <Col span={12}>
         <Link to="/transferxzil">
-          <Button>Transfer $xZIL</Button>
+          <Button>Transfer xZIL</Button>
         </Link>
       </Col>
       <Col span={24}>

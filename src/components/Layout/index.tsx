@@ -25,7 +25,7 @@ export const AppLayout = React.memo((props: any) => {
         <div>
           <img src={tyron_logo} alt="tyron_logo" title="tyron_logo" width="500"/>
         </div>
-        <ReactNative.Text style={ Themed.styles.slogan }>own your data, empower your world</ReactNative.Text>
+        <ReactNative.Text style={ Themed.styles.slogan }>own your data x empower your world</ReactNative.Text>
         <Content style={{ padding: "0 50px" }}>{props.children}</Content>
       </Layout>
     </div>

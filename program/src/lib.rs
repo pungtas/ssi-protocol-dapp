@@ -1,122 +1,25 @@
-#![deny(safe_packed_borrows)]
-#![allow(clippy::try_err)]
-
-#[macro_use]
+pub mod buffer;
 pub mod error;
-
-#[cfg(test)]
-mod tests;
-
-pub mod critbit;
-mod fees;
 pub mod instruction;
-pub mod matching;
+pub mod native_mint;
+pub mod processor;
 pub mod state;
 
-#[cfg(feature = "program")]
-use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, entrypoint_deprecated, pubkey::Pubkey,
-};
-
-#[cfg(feature = "program")]
 #[cfg(not(feature = "no-entrypoint"))]
-entrypoint_deprecated!(process_instruction);
-#[cfg(feature = "program")]
-fn process_instruction(
-    program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    instruction_data: &[u8],
-) -> ProgramResult {
-    Ok(state::State::process(
-        program_id,
-        accounts,
-        instruction_data,
-    )?)
+mod entrypoint;
+
+// Export current sdk types for downstream users building with a different sdk version
+pub use solana_program;
+
+/// Convert the UI representation of a token amount (using the decimals field defined in its mint)
+/// to the raw amount
+pub fn ui_amount_to_amount(ui_amount: f64, decimals: u8) -> u64 {
+    (ui_amount * 10_usize.pow(decimals as u32) as f64) as u64
 }
 
-
-
-use solana_program::{
-    account_info::{next_account_info, AccountInfo},
-    entrypoint,
-    entrypoint::ProgramResult,
-    msg,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-};
-use std::mem;
-
-entrypoint!(process_instruction);
-fn process_instruction(
-    program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    instruction_data: &[u8],
-) -> ProgramResult {
-    msg!(
-        "process_instruction: {}: {} accounts, data={:?}",
-        program_id,
-        accounts.len(),
-        instruction_data
-    );
-
-    let accounts_iter = &mut accounts.iter();
-
-    // Get the account to transfer to
-    let account = next_account_info(accounts_iter)?;
-
-    // The account must be owned by the program in order to modify its data
-    if account.owner != program_id {
-        msg!("Recipient account does not have the correct program id");
-        return Err(ProgramError::IncorrectProgramId);
-    }
-
-    // The data must be large enough to hold a u64 count
-    if account.try_data_len()? < mem::size_of::<u32>() {
-        msg!("Account data length too small for u32");
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    // Increment and store the number of times the account has been greeted
-    let mut data = account.try_borrow_mut_data()?;
-    let mut num_greets = LittleEndian::read_u32(&data);
-    num_greets += 1;
-    LittleEndian::write_u32(&mut data[0..], num_greets);
-
-    Ok(())
+/// Convert a raw amount to its UI representation (using the decimals field defined in its mint)
+pub fn amount_to_ui_amount(amount: u64, decimals: u8) -> f64 {
+    amount as f64 / 10_usize.pow(decimals as u32) as f64
 }
 
-#[cfg(test)]
-mod test {
-    use {
-        super::*,
-        assert_matches::*,
-        solana_program::instruction::{AccountMeta, Instruction},
-        solana_program_test::*,
-        solana_sdk::{signature::Signer, transaction::Transaction},
-    };
-
-    #[tokio::test]
-    async fn test_transaction() {
-        let program_id = Pubkey::new_unique();
-
-        let (mut banks_client, payer, recent_blockhash) = ProgramTest::new(
-            "bpf_program_template",
-            program_id,
-            processor!(process_instruction),
-        )
-        .start()
-        .await;
-
-        let mut transaction = Transaction::new_with_payer(
-            &[Instruction {
-                program_id,
-                accounts: vec![AccountMeta::new(payer.pubkey(), false)],
-                data: vec![1, 2, 3],
-            }],
-            Some(&payer.pubkey()),
-        );
-        transaction.sign(&[&payer], recent_blockhash);
-
-        assert_matches!(banks_client.process_transaction(transaction).await, Ok(()));
-    }
-}
+solana_program::declare_id!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");

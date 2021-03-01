@@ -84,7 +84,7 @@ export const styles = ReactNative.StyleSheet.create({
 		fontFamily: 'Ubuntu'
 	},
 	button: {
-		marginBottom: 40,
+		marginBottom: 50,
 		backgroundColor: 'white',
 		padding: 5,
 		borderRadius: 5,
@@ -98,6 +98,12 @@ export const styles = ReactNative.StyleSheet.create({
 		color: '#000',
 		fontFamily: 'Ubuntu',
 		fontWeight: '400'
+	},
+	inputText: {
+		fontSize: 24,
+		color: '#000',
+		marginVertical: 40,
+		fontFamily: 'Ubuntu'
 	},
 	image: {
 		height: ReactNative.Dimensions.get('screen').height,
@@ -162,12 +168,6 @@ export const styles = ReactNative.StyleSheet.create({
 		marginTop: 25,
 		marginBottom: 10,
 		color: '#cccccc'
-	},
-	inputText: {
-		fontSize: 24,
-		color: '#000',
-		marginVertical: 40,
-		fontFamily: 'Ubuntu'
 	},
 	options: {
 		flexDirection: 'row',

@@ -1,17 +1,19 @@
 //! Program state processor
+#![allow(unused_imports)]
 
 use crate::{
-    error::TokenError,
+    error::ProtocolError,
     instruction::{is_valid_signer_index, AuthorityType, TokenInstruction, MAX_SIGNERS},
     state::{Account, AccountState, Mint, Multisig},
 };
-use num_traits::FromPrimitive;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
-    decode_error::DecodeError,
     entrypoint::ProgramResult,
     msg,
-    program_error::{PrintProgramError, ProgramError},
+    program_error::{
+        ProgramError,
+        PrintProgramError
+    },
     program_option::COption,
     program_pack::{IsInitialized, Pack},
     pubkey::Pubkey,
@@ -21,628 +23,37 @@ use solana_program::{
 /// Program state handler.
 pub struct Processor {}
 impl Processor {
-    /// Processes an [InitializeMint](enum.TokenInstruction.html) instruction.
-    pub fn process_initialize_mint(
+    /*for the message
+    pub fn process_instruction(
+        _: &Pubkey,
         accounts: &[AccountInfo],
-        decimals: u8,
-        mint_authority: Pubkey,
-        freeze_authority: COption<Pubkey>,
+        instruction: &[u8]
     ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let mint_info = next_account_info(account_info_iter)?;
-        let mint_data_len = mint_info.data_len();
-        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
-
-        let mut mint = Mint::unpack_unchecked(&mint_info.data.borrow())?;
-        if mint.is_initialized {
-            return Err(TokenError::AlreadyInUse.into());
+        if accounts.len() == 0 {
+            Err(MessageError::NoAccountsPassed)?
         }
-
-        if !rent.is_exempt(mint_info.lamports(), mint_data_len) {
-            return Err(TokenError::NotRentExempt.into());
+        if accounts.len() == 1 {
+            Err(MessageError::QueueNotPassed)?
         }
-
-        mint.mint_authority = COption::Some(mint_authority);
-        mint.decimals = decimals;
-        mint.is_initialized = true;
-        mint.freeze_authority = freeze_authority;
-
-        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
-
+        if accounts.len() > 2 {
+            Err(MessageError::ExtraAccountsPassed)?
+        }
+        let signer = &accounts[0];
+        let queue = &accounts[1];
+        if !signer.is_signer {
+            Err(MessageError::SenderDidNotSign)?;
+        }
+        let message = Message::unpack(instruction)?;
+        let mut queue_ref = queue.try_borrow_mut_data()?;
+        let message_buffer = MessageBuffer::unpack(&mut *queue_ref)?;
+    
+        message_buffer.append(&message);
         Ok(())
     }
-
-    fn _process_initialize_account(
-        accounts: &[AccountInfo],
-        owner: Option<&Pubkey>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let new_account_info = next_account_info(account_info_iter)?;
-        let mint_info = next_account_info(account_info_iter)?;
-        let owner = if let Some(owner) = owner {
-            owner
-        } else {
-            next_account_info(account_info_iter)?.key
-        };
-        let new_account_info_data_len = new_account_info.data_len();
-        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
-
-        let mut account = Account::unpack_unchecked(&new_account_info.data.borrow())?;
-        if account.is_initialized() {
-            return Err(TokenError::AlreadyInUse.into());
-        }
-
-        if !rent.is_exempt(new_account_info.lamports(), new_account_info_data_len) {
-            return Err(TokenError::NotRentExempt.into());
-        }
-
-        if *mint_info.key != crate::native_mint::id() {
-            let _ = Mint::unpack(&mint_info.data.borrow_mut())
-                .map_err(|_| Into::<ProgramError>::into(TokenError::InvalidMint))?;
-        }
-
-        account.mint = *mint_info.key;
-        account.owner = *owner;
-        account.delegate = COption::None;
-        account.delegated_amount = 0;
-        account.state = AccountState::Initialized;
-        if *mint_info.key == crate::native_mint::id() {
-            let rent_exempt_reserve = rent.minimum_balance(new_account_info_data_len);
-            account.is_native = COption::Some(rent_exempt_reserve);
-            account.amount = new_account_info
-                .lamports()
-                .checked_sub(rent_exempt_reserve)
-                .ok_or(TokenError::Overflow)?;
-        } else {
-            account.is_native = COption::None;
-            account.amount = 0;
-        };
-
-        Account::pack(account, &mut new_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [InitializeAccount](enum.TokenInstruction.html) instruction.
-    pub fn process_initialize_account(accounts: &[AccountInfo]) -> ProgramResult {
-        Self::_process_initialize_account(accounts, None)
-    }
-
-    /// Processes an [InitializeAccount2](enum.TokenInstruction.html) instruction.
-    pub fn process_initialize_account2(accounts: &[AccountInfo], owner: Pubkey) -> ProgramResult {
-        Self::_process_initialize_account(accounts, Some(&owner))
-    }
-
-    /// Processes a [InitializeMultisig](enum.TokenInstruction.html) instruction.
-    pub fn process_initialize_multisig(accounts: &[AccountInfo], m: u8) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let multisig_info = next_account_info(account_info_iter)?;
-        let multisig_info_data_len = multisig_info.data_len();
-        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
-
-        let mut multisig = Multisig::unpack_unchecked(&multisig_info.data.borrow())?;
-        if multisig.is_initialized {
-            return Err(TokenError::AlreadyInUse.into());
-        }
-
-        if !rent.is_exempt(multisig_info.lamports(), multisig_info_data_len) {
-            return Err(TokenError::NotRentExempt.into());
-        }
-
-        let signer_infos = account_info_iter.as_slice();
-        multisig.m = m;
-        multisig.n = signer_infos.len() as u8;
-        if !is_valid_signer_index(multisig.n as usize) {
-            return Err(TokenError::InvalidNumberOfProvidedSigners.into());
-        }
-        if !is_valid_signer_index(multisig.m as usize) {
-            return Err(TokenError::InvalidNumberOfRequiredSigners.into());
-        }
-        for (i, signer_info) in signer_infos.iter().enumerate() {
-            multisig.signers[i] = *signer_info.key;
-        }
-        multisig.is_initialized = true;
-
-        Multisig::pack(multisig, &mut multisig_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [Transfer](enum.TokenInstruction.html) instruction.
-    pub fn process_transfer(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        amount: u64,
-        expected_decimals: Option<u8>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-
-        let source_account_info = next_account_info(account_info_iter)?;
-
-        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
-            Some((next_account_info(account_info_iter)?, expected_decimals))
-        } else {
-            None
-        };
-
-        let dest_account_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
-
-        if source_account.is_frozen() || dest_account.is_frozen() {
-            return Err(TokenError::AccountFrozen.into());
-        }
-        if source_account.amount < amount {
-            return Err(TokenError::InsufficientFunds.into());
-        }
-        if source_account.mint != dest_account.mint {
-            return Err(TokenError::MintMismatch.into());
-        }
-
-        if let Some((mint_info, expected_decimals)) = expected_mint_info {
-            if source_account.mint != *mint_info.key {
-                return Err(TokenError::MintMismatch.into());
-            }
-
-            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
-            if expected_decimals != mint.decimals {
-                return Err(TokenError::MintDecimalsMismatch.into());
-            }
-        }
-
-        let self_transfer = source_account_info.key == dest_account_info.key;
-
-        match source_account.delegate {
-            COption::Some(ref delegate) if authority_info.key == delegate => {
-                Self::validate_owner(
-                    program_id,
-                    delegate,
-                    authority_info,
-                    account_info_iter.as_slice(),
-                )?;
-                if source_account.delegated_amount < amount {
-                    return Err(TokenError::InsufficientFunds.into());
-                }
-                if !self_transfer {
-                    source_account.delegated_amount = source_account
-                        .delegated_amount
-                        .checked_sub(amount)
-                        .ok_or(TokenError::Overflow)?;
-                    if source_account.delegated_amount == 0 {
-                        source_account.delegate = COption::None;
-                    }
-                }
-            }
-            _ => Self::validate_owner(
-                program_id,
-                &source_account.owner,
-                authority_info,
-                account_info_iter.as_slice(),
-            )?,
-        };
-
-        // This check MUST occur just before the amounts are manipulated
-        // to ensure self-transfers are fully validated
-        if self_transfer {
-            return Ok(());
-        }
-
-        source_account.amount = source_account
-            .amount
-            .checked_sub(amount)
-            .ok_or(TokenError::Overflow)?;
-        dest_account.amount = dest_account
-            .amount
-            .checked_add(amount)
-            .ok_or(TokenError::Overflow)?;
-
-        if source_account.is_native() {
-            let source_starting_lamports = source_account_info.lamports();
-            **source_account_info.lamports.borrow_mut() = source_starting_lamports
-                .checked_sub(amount)
-                .ok_or(TokenError::Overflow)?;
-
-            let dest_starting_lamports = dest_account_info.lamports();
-            **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
-                .checked_add(amount)
-                .ok_or(TokenError::Overflow)?;
-        }
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Approve](enum.TokenInstruction.html) instruction.
-    pub fn process_approve(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        amount: u64,
-        expected_decimals: Option<u8>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-
-        let source_account_info = next_account_info(account_info_iter)?;
-        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
-            Some((next_account_info(account_info_iter)?, expected_decimals))
-        } else {
-            None
-        };
-        let delegate_info = next_account_info(account_info_iter)?;
-        let owner_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-
-        if source_account.is_frozen() {
-            return Err(TokenError::AccountFrozen.into());
-        }
-
-        if let Some((mint_info, expected_decimals)) = expected_mint_info {
-            if source_account.mint != *mint_info.key {
-                return Err(TokenError::MintMismatch.into());
-            }
-
-            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
-            if expected_decimals != mint.decimals {
-                return Err(TokenError::MintDecimalsMismatch.into());
-            }
-        }
-
-        Self::validate_owner(
-            program_id,
-            &source_account.owner,
-            owner_info,
-            account_info_iter.as_slice(),
-        )?;
-
-        source_account.delegate = COption::Some(*delegate_info.key);
-        source_account.delegated_amount = amount;
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes an [Revoke](enum.TokenInstruction.html) instruction.
-    pub fn process_revoke(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let source_account_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-
-        let owner_info = next_account_info(account_info_iter)?;
-
-        if source_account.is_frozen() {
-            return Err(TokenError::AccountFrozen.into());
-        }
-
-        Self::validate_owner(
-            program_id,
-            &source_account.owner,
-            owner_info,
-            account_info_iter.as_slice(),
-        )?;
-
-        source_account.delegate = COption::None;
-        source_account.delegated_amount = 0;
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [SetAuthority](enum.TokenInstruction.html) instruction.
-    pub fn process_set_authority(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        authority_type: AuthorityType,
-        new_authority: COption<Pubkey>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let account_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        if account_info.data_len() == Account::get_packed_len() {
-            let mut account = Account::unpack(&account_info.data.borrow())?;
-
-            if account.is_frozen() {
-                return Err(TokenError::AccountFrozen.into());
-            }
-
-            match authority_type {
-                AuthorityType::AccountOwner => {
-                    Self::validate_owner(
-                        program_id,
-                        &account.owner,
-                        authority_info,
-                        account_info_iter.as_slice(),
-                    )?;
-
-                    if let COption::Some(authority) = new_authority {
-                        account.owner = authority;
-                    } else {
-                        return Err(TokenError::InvalidInstruction.into());
-                    }
-                }
-                AuthorityType::CloseAccount => {
-                    let authority = account.close_authority.unwrap_or(account.owner);
-                    Self::validate_owner(
-                        program_id,
-                        &authority,
-                        authority_info,
-                        account_info_iter.as_slice(),
-                    )?;
-                    account.close_authority = new_authority;
-                }
-                _ => {
-                    return Err(TokenError::AuthorityTypeNotSupported.into());
-                }
-            }
-            Account::pack(account, &mut account_info.data.borrow_mut())?;
-        } else if account_info.data_len() == Mint::get_packed_len() {
-            let mut mint = Mint::unpack(&account_info.data.borrow())?;
-            match authority_type {
-                AuthorityType::MintTokens => {
-                    // Once a mint's supply is fixed, it cannot be undone by setting a new
-                    // mint_authority
-                    let mint_authority = mint
-                        .mint_authority
-                        .ok_or(Into::<ProgramError>::into(TokenError::FixedSupply))?;
-                    Self::validate_owner(
-                        program_id,
-                        &mint_authority,
-                        authority_info,
-                        account_info_iter.as_slice(),
-                    )?;
-                    mint.mint_authority = new_authority;
-                }
-                AuthorityType::FreezeAccount => {
-                    // Once a mint's freeze authority is disabled, it cannot be re-enabled by
-                    // setting a new freeze_authority
-                    let freeze_authority = mint
-                        .freeze_authority
-                        .ok_or(Into::<ProgramError>::into(TokenError::MintCannotFreeze))?;
-                    Self::validate_owner(
-                        program_id,
-                        &freeze_authority,
-                        authority_info,
-                        account_info_iter.as_slice(),
-                    )?;
-                    mint.freeze_authority = new_authority;
-                }
-                _ => {
-                    return Err(TokenError::AuthorityTypeNotSupported.into());
-                }
-            }
-            Mint::pack(mint, &mut account_info.data.borrow_mut())?;
-        } else {
-            return Err(ProgramError::InvalidArgument);
-        }
-
-        Ok(())
-    }
-
-    /// Processes a [MintTo](enum.TokenInstruction.html) instruction.
-    pub fn process_mint_to(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        amount: u64,
-        expected_decimals: Option<u8>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let mint_info = next_account_info(account_info_iter)?;
-        let dest_account_info = next_account_info(account_info_iter)?;
-        let owner_info = next_account_info(account_info_iter)?;
-
-        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
-        if dest_account.is_frozen() {
-            return Err(TokenError::AccountFrozen.into());
-        }
-
-        if dest_account.is_native() {
-            return Err(TokenError::NativeNotSupported.into());
-        }
-        if mint_info.key != &dest_account.mint {
-            return Err(TokenError::MintMismatch.into());
-        }
-
-        let mut mint = Mint::unpack(&mint_info.data.borrow())?;
-        if let Some(expected_decimals) = expected_decimals {
-            if expected_decimals != mint.decimals {
-                return Err(TokenError::MintDecimalsMismatch.into());
-            }
-        }
-
-        match mint.mint_authority {
-            COption::Some(mint_authority) => Self::validate_owner(
-                program_id,
-                &mint_authority,
-                owner_info,
-                account_info_iter.as_slice(),
-            )?,
-            COption::None => return Err(TokenError::FixedSupply.into()),
-        }
-
-        dest_account.amount = dest_account
-            .amount
-            .checked_add(amount)
-            .ok_or(TokenError::Overflow)?;
-
-        mint.supply = mint
-            .supply
-            .checked_add(amount)
-            .ok_or(TokenError::Overflow)?;
-
-        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
-        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [Burn](enum.TokenInstruction.html) instruction.
-    pub fn process_burn(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        amount: u64,
-        expected_decimals: Option<u8>,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-
-        let source_account_info = next_account_info(account_info_iter)?;
-        let mint_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-        let mut mint = Mint::unpack(&mint_info.data.borrow())?;
-
-        if source_account.is_frozen() {
-            return Err(TokenError::AccountFrozen.into());
-        }
-        if source_account.is_native() {
-            return Err(TokenError::NativeNotSupported.into());
-        }
-        if source_account.amount < amount {
-            return Err(TokenError::InsufficientFunds.into());
-        }
-        if mint_info.key != &source_account.mint {
-            return Err(TokenError::MintMismatch.into());
-        }
-
-        if let Some(expected_decimals) = expected_decimals {
-            if expected_decimals != mint.decimals {
-                return Err(TokenError::MintDecimalsMismatch.into());
-            }
-        }
-
-        match source_account.delegate {
-            COption::Some(ref delegate) if authority_info.key == delegate => {
-                Self::validate_owner(
-                    program_id,
-                    delegate,
-                    authority_info,
-                    account_info_iter.as_slice(),
-                )?;
-
-                if source_account.delegated_amount < amount {
-                    return Err(TokenError::InsufficientFunds.into());
-                }
-                source_account.delegated_amount = source_account
-                    .delegated_amount
-                    .checked_sub(amount)
-                    .ok_or(TokenError::Overflow)?;
-                if source_account.delegated_amount == 0 {
-                    source_account.delegate = COption::None;
-                }
-            }
-            _ => Self::validate_owner(
-                program_id,
-                &source_account.owner,
-                authority_info,
-                account_info_iter.as_slice(),
-            )?,
-        }
-
-        source_account.amount = source_account
-            .amount
-            .checked_sub(amount)
-            .ok_or(TokenError::Overflow)?;
-        mint.supply = mint
-            .supply
-            .checked_sub(amount)
-            .ok_or(TokenError::Overflow)?;
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [CloseAccount](enum.TokenInstruction.html) instruction.
-    pub fn process_close_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let source_account_info = next_account_info(account_info_iter)?;
-        let dest_account_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-        if !source_account.is_native() && source_account.amount != 0 {
-            return Err(TokenError::NonNativeHasBalance.into());
-        }
-
-        let authority = source_account
-            .close_authority
-            .unwrap_or(source_account.owner);
-        Self::validate_owner(
-            program_id,
-            &authority,
-            authority_info,
-            account_info_iter.as_slice(),
-        )?;
-
-        let dest_starting_lamports = dest_account_info.lamports();
-        **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
-            .checked_add(source_account_info.lamports())
-            .ok_or(TokenError::Overflow)?;
-
-        **source_account_info.lamports.borrow_mut() = 0;
-        source_account.amount = 0;
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
-    /// Processes a [FreezeAccount](enum.TokenInstruction.html) or a
-    /// [ThawAccount](enum.TokenInstruction.html) instruction.
-    pub fn process_toggle_freeze_account(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        freeze: bool,
-    ) -> ProgramResult {
-        let account_info_iter = &mut accounts.iter();
-        let source_account_info = next_account_info(account_info_iter)?;
-        let mint_info = next_account_info(account_info_iter)?;
-        let authority_info = next_account_info(account_info_iter)?;
-
-        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
-        if freeze && source_account.is_frozen() || !freeze && !source_account.is_frozen() {
-            return Err(TokenError::InvalidState.into());
-        }
-        if source_account.is_native() {
-            return Err(TokenError::NativeNotSupported.into());
-        }
-        if mint_info.key != &source_account.mint {
-            return Err(TokenError::MintMismatch.into());
-        }
-
-        let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
-        match mint.freeze_authority {
-            COption::Some(authority) => Self::validate_owner(
-                program_id,
-                &authority,
-                authority_info,
-                account_info_iter.as_slice(),
-            ),
-            COption::None => Err(TokenError::MintCannotFreeze.into()),
-        }?;
-
-        source_account.state = if freeze {
-            AccountState::Frozen
-        } else {
-            AccountState::Initialized
-        };
-
-        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
-
-        Ok(())
-    }
-
+    */
     /// Processes an [Instruction](enum.Instruction.html).
-    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
-        let instruction = TokenInstruction::unpack(input)?;
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
+        let instruction = TokenInstruction::unpack(instruction_data)?;
 
         match instruction {
             TokenInstruction::InitializeMint {
@@ -723,6 +134,625 @@ impl Processor {
         }
     }
 
+    /// Processes an [InitializeMint](enum.TokenInstruction.html) instruction.
+    pub fn process_initialize_mint(
+        accounts: &[AccountInfo],
+        decimals: u8,
+        mint_authority: Pubkey,
+        freeze_authority: COption<Pubkey>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let mint_info = next_account_info(account_info_iter)?;
+        let mint_data_len = mint_info.data_len();
+        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
+
+        let mut mint = Mint::unpack_unchecked(&mint_info.data.borrow())?;
+        if mint.is_initialized {
+            return Err(ProtocolError::AlreadyInUse.into());
+        }
+
+        if !rent.is_exempt(mint_info.lamports(), mint_data_len) {
+            return Err(ProtocolError::NotRentExempt.into());
+        }
+
+        mint.mint_authority = COption::Some(mint_authority);
+        mint.decimals = decimals;
+        mint.is_initialized = true;
+        mint.freeze_authority = freeze_authority;
+
+        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    fn _process_initialize_account(
+        accounts: &[AccountInfo],
+        owner: Option<&Pubkey>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let new_account_info = next_account_info(account_info_iter)?;
+        let mint_info = next_account_info(account_info_iter)?;
+        let owner = if let Some(owner) = owner {
+            owner
+        } else {
+            next_account_info(account_info_iter)?.key
+        };
+        let new_account_info_data_len = new_account_info.data_len();
+        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
+
+        let mut account = Account::unpack_unchecked(&new_account_info.data.borrow())?;
+        if account.is_initialized() {
+            return Err(ProtocolError::AlreadyInUse.into());
+        }
+
+        if !rent.is_exempt(new_account_info.lamports(), new_account_info_data_len) {
+            return Err(ProtocolError::NotRentExempt.into());
+        }
+
+        if *mint_info.key != crate::native_mint::id() {
+            let _ = Mint::unpack(&mint_info.data.borrow_mut())
+                .map_err(|_| Into::<ProgramError>::into(ProtocolError::InvalidMint))?;
+        }
+
+        account.mint = *mint_info.key;
+        account.owner = *owner;
+        account.delegate = COption::None;
+        account.delegated_amount = 0;
+        account.state = AccountState::Initialized;
+        if *mint_info.key == crate::native_mint::id() {
+            let rent_exempt_reserve = rent.minimum_balance(new_account_info_data_len);
+            account.is_native = COption::Some(rent_exempt_reserve);
+            account.amount = new_account_info
+                .lamports()
+                .checked_sub(rent_exempt_reserve)
+                .ok_or(ProtocolError::Overflow)?;
+        } else {
+            account.is_native = COption::None;
+            account.amount = 0;
+        };
+
+        Account::pack(account, &mut new_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes an [InitializeAccount](enum.TokenInstruction.html) instruction.
+    pub fn process_initialize_account(accounts: &[AccountInfo]) -> ProgramResult {
+        Self::_process_initialize_account(accounts, None)
+    }
+
+    /// Processes an [InitializeAccount2](enum.TokenInstruction.html) instruction.
+    pub fn process_initialize_account2(accounts: &[AccountInfo], owner: Pubkey) -> ProgramResult {
+        Self::_process_initialize_account(accounts, Some(&owner))
+    }
+
+    /// Processes a [InitializeMultisig](enum.TokenInstruction.html) instruction.
+    pub fn process_initialize_multisig(accounts: &[AccountInfo], m: u8) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let multisig_info = next_account_info(account_info_iter)?;
+        let multisig_info_data_len = multisig_info.data_len();
+        let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
+
+        let mut multisig = Multisig::unpack_unchecked(&multisig_info.data.borrow())?;
+        if multisig.is_initialized {
+            return Err(ProtocolError::AlreadyInUse.into());
+        }
+
+        if !rent.is_exempt(multisig_info.lamports(), multisig_info_data_len) {
+            return Err(ProtocolError::NotRentExempt.into());
+        }
+
+        let signer_infos = account_info_iter.as_slice();
+        multisig.m = m;
+        multisig.n = signer_infos.len() as u8;
+        if !is_valid_signer_index(multisig.n as usize) {
+            return Err(ProtocolError::InvalidNumberOfProvidedSigners.into());
+        }
+        if !is_valid_signer_index(multisig.m as usize) {
+            return Err(ProtocolError::InvalidNumberOfRequiredSigners.into());
+        }
+        for (i, signer_info) in signer_infos.iter().enumerate() {
+            multisig.signers[i] = *signer_info.key;
+        }
+        multisig.is_initialized = true;
+
+        Multisig::pack(multisig, &mut multisig_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes a [Transfer](enum.TokenInstruction.html) instruction.
+    pub fn process_transfer(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        expected_decimals: Option<u8>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+
+        let source_account_info = next_account_info(account_info_iter)?;
+
+        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
+            Some((next_account_info(account_info_iter)?, expected_decimals))
+        } else {
+            None
+        };
+
+        let dest_account_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
+
+        if source_account.is_frozen() || dest_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+        if source_account.amount < amount {
+            return Err(ProtocolError::InsufficientFunds.into());
+        }
+        if source_account.mint != dest_account.mint {
+            return Err(ProtocolError::MintMismatch.into());
+        }
+
+        if let Some((mint_info, expected_decimals)) = expected_mint_info {
+            if source_account.mint != *mint_info.key {
+                return Err(ProtocolError::MintMismatch.into());
+            }
+
+            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
+            if expected_decimals != mint.decimals {
+                return Err(ProtocolError::MintDecimalsMismatch.into());
+            }
+        }
+
+        let self_transfer = source_account_info.key == dest_account_info.key;
+
+        match source_account.delegate {
+            COption::Some(ref delegate) if authority_info.key == delegate => {
+                Self::validate_owner(
+                    program_id,
+                    delegate,
+                    authority_info,
+                    account_info_iter.as_slice(),
+                )?;
+                if source_account.delegated_amount < amount {
+                    return Err(ProtocolError::InsufficientFunds.into());
+                }
+                if !self_transfer {
+                    source_account.delegated_amount = source_account
+                        .delegated_amount
+                        .checked_sub(amount)
+                        .ok_or(ProtocolError::Overflow)?;
+                    if source_account.delegated_amount == 0 {
+                        source_account.delegate = COption::None;
+                    }
+                }
+            }
+            _ => Self::validate_owner(
+                program_id,
+                &source_account.owner,
+                authority_info,
+                account_info_iter.as_slice(),
+            )?,
+        };
+
+        // This check MUST occur just before the amounts are manipulated
+        // to ensure self-transfers are fully validated
+        if self_transfer {
+            return Ok(());
+        }
+
+        source_account.amount = source_account
+            .amount
+            .checked_sub(amount)
+            .ok_or(ProtocolError::Overflow)?;
+        dest_account.amount = dest_account
+            .amount
+            .checked_add(amount)
+            .ok_or(ProtocolError::Overflow)?;
+
+        if source_account.is_native() {
+            let source_starting_lamports = source_account_info.lamports();
+            **source_account_info.lamports.borrow_mut() = source_starting_lamports
+                .checked_sub(amount)
+                .ok_or(ProtocolError::Overflow)?;
+
+            let dest_starting_lamports = dest_account_info.lamports();
+            **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
+                .checked_add(amount)
+                .ok_or(ProtocolError::Overflow)?;
+        }
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes an [Approve](enum.TokenInstruction.html) instruction.
+    pub fn process_approve(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        expected_decimals: Option<u8>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+
+        let source_account_info = next_account_info(account_info_iter)?;
+        let expected_mint_info = if let Some(expected_decimals) = expected_decimals {
+            Some((next_account_info(account_info_iter)?, expected_decimals))
+        } else {
+            None
+        };
+        let delegate_info = next_account_info(account_info_iter)?;
+        let owner_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+
+        if source_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+
+        if let Some((mint_info, expected_decimals)) = expected_mint_info {
+            if source_account.mint != *mint_info.key {
+                return Err(ProtocolError::MintMismatch.into());
+            }
+
+            let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
+            if expected_decimals != mint.decimals {
+                return Err(ProtocolError::MintDecimalsMismatch.into());
+            }
+        }
+
+        Self::validate_owner(
+            program_id,
+            &source_account.owner,
+            owner_info,
+            account_info_iter.as_slice(),
+        )?;
+
+        source_account.delegate = COption::Some(*delegate_info.key);
+        source_account.delegated_amount = amount;
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes an [Revoke](enum.TokenInstruction.html) instruction.
+    pub fn process_revoke(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let source_account_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+
+        let owner_info = next_account_info(account_info_iter)?;
+
+        if source_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+
+        Self::validate_owner(
+            program_id,
+            &source_account.owner,
+            owner_info,
+            account_info_iter.as_slice(),
+        )?;
+
+        source_account.delegate = COption::None;
+        source_account.delegated_amount = 0;
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes a [SetAuthority](enum.TokenInstruction.html) instruction.
+    pub fn process_set_authority(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        authority_type: AuthorityType,
+        new_authority: COption<Pubkey>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let account_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+
+        if account_info.data_len() == Account::get_packed_len() {
+            let mut account = Account::unpack(&account_info.data.borrow())?;
+
+            if account.is_frozen() {
+                return Err(ProtocolError::AccountFrozen.into());
+            }
+
+            match authority_type {
+                AuthorityType::AccountOwner => {
+                    Self::validate_owner(
+                        program_id,
+                        &account.owner,
+                        authority_info,
+                        account_info_iter.as_slice(),
+                    )?;
+
+                    if let COption::Some(authority) = new_authority {
+                        account.owner = authority;
+                    } else {
+                        return Err(ProtocolError::InvalidInstruction.into());
+                    }
+                }
+                AuthorityType::CloseAccount => {
+                    let authority = account.close_authority.unwrap_or(account.owner);
+                    Self::validate_owner(
+                        program_id,
+                        &authority,
+                        authority_info,
+                        account_info_iter.as_slice(),
+                    )?;
+                    account.close_authority = new_authority;
+                }
+                _ => {
+                    return Err(ProtocolError::AuthorityTypeNotSupported.into());
+                }
+            }
+            Account::pack(account, &mut account_info.data.borrow_mut())?;
+        } else if account_info.data_len() == Mint::get_packed_len() {
+            let mut mint = Mint::unpack(&account_info.data.borrow())?;
+            match authority_type {
+                AuthorityType::MintTokens => {
+                    // Once a mint's supply is fixed, it cannot be undone by setting a new
+                    // mint_authority
+                    let mint_authority = mint
+                        .mint_authority
+                        .ok_or(Into::<ProgramError>::into(ProtocolError::FixedSupply))?;
+                    Self::validate_owner(
+                        program_id,
+                        &mint_authority,
+                        authority_info,
+                        account_info_iter.as_slice(),
+                    )?;
+                    mint.mint_authority = new_authority;
+                }
+                AuthorityType::FreezeAccount => {
+                    // Once a mint's freeze authority is disabled, it cannot be re-enabled by
+                    // setting a new freeze_authority
+                    let freeze_authority = mint
+                        .freeze_authority
+                        .ok_or(Into::<ProgramError>::into(ProtocolError::MintCannotFreeze))?;
+                    Self::validate_owner(
+                        program_id,
+                        &freeze_authority,
+                        authority_info,
+                        account_info_iter.as_slice(),
+                    )?;
+                    mint.freeze_authority = new_authority;
+                }
+                _ => {
+                    return Err(ProtocolError::AuthorityTypeNotSupported.into());
+                }
+            }
+            Mint::pack(mint, &mut account_info.data.borrow_mut())?;
+        } else {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        Ok(())
+    }
+
+    /// Processes a [MintTo](enum.TokenInstruction.html) instruction.
+    pub fn process_mint_to(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        expected_decimals: Option<u8>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let mint_info = next_account_info(account_info_iter)?;
+        let dest_account_info = next_account_info(account_info_iter)?;
+        let owner_info = next_account_info(account_info_iter)?;
+
+        let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
+        if dest_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+
+        if dest_account.is_native() {
+            return Err(ProtocolError::NativeNotSupported.into());
+        }
+        if mint_info.key != &dest_account.mint {
+            return Err(ProtocolError::MintMismatch.into());
+        }
+
+        let mut mint = Mint::unpack(&mint_info.data.borrow())?;
+        if let Some(expected_decimals) = expected_decimals {
+            if expected_decimals != mint.decimals {
+                return Err(ProtocolError::MintDecimalsMismatch.into());
+            }
+        }
+
+        match mint.mint_authority {
+            COption::Some(mint_authority) => Self::validate_owner(
+                program_id,
+                &mint_authority,
+                owner_info,
+                account_info_iter.as_slice(),
+            )?,
+            COption::None => return Err(ProtocolError::FixedSupply.into()),
+        }
+
+        dest_account.amount = dest_account
+            .amount
+            .checked_add(amount)
+            .ok_or(ProtocolError::Overflow)?;
+
+        mint.supply = mint
+            .supply
+            .checked_add(amount)
+            .ok_or(ProtocolError::Overflow)?;
+
+        Account::pack(dest_account, &mut dest_account_info.data.borrow_mut())?;
+        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes a [Burn](enum.TokenInstruction.html) instruction.
+    pub fn process_burn(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        expected_decimals: Option<u8>,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+
+        let source_account_info = next_account_info(account_info_iter)?;
+        let mint_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+        let mut mint = Mint::unpack(&mint_info.data.borrow())?;
+
+        if source_account.is_frozen() {
+            return Err(ProtocolError::AccountFrozen.into());
+        }
+        if source_account.is_native() {
+            return Err(ProtocolError::NativeNotSupported.into());
+        }
+        if source_account.amount < amount {
+            return Err(ProtocolError::InsufficientFunds.into());
+        }
+        if mint_info.key != &source_account.mint {
+            return Err(ProtocolError::MintMismatch.into());
+        }
+
+        if let Some(expected_decimals) = expected_decimals {
+            if expected_decimals != mint.decimals {
+                return Err(ProtocolError::MintDecimalsMismatch.into());
+            }
+        }
+
+        match source_account.delegate {
+            COption::Some(ref delegate) if authority_info.key == delegate => {
+                Self::validate_owner(
+                    program_id,
+                    delegate,
+                    authority_info,
+                    account_info_iter.as_slice(),
+                )?;
+
+                if source_account.delegated_amount < amount {
+                    return Err(ProtocolError::InsufficientFunds.into());
+                }
+                source_account.delegated_amount = source_account
+                    .delegated_amount
+                    .checked_sub(amount)
+                    .ok_or(ProtocolError::Overflow)?;
+                if source_account.delegated_amount == 0 {
+                    source_account.delegate = COption::None;
+                }
+            }
+            _ => Self::validate_owner(
+                program_id,
+                &source_account.owner,
+                authority_info,
+                account_info_iter.as_slice(),
+            )?,
+        }
+
+        source_account.amount = source_account
+            .amount
+            .checked_sub(amount)
+            .ok_or(ProtocolError::Overflow)?;
+        mint.supply = mint
+            .supply
+            .checked_sub(amount)
+            .ok_or(ProtocolError::Overflow)?;
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+        Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes a [CloseAccount](enum.TokenInstruction.html) instruction.
+    pub fn process_close_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let source_account_info = next_account_info(account_info_iter)?;
+        let dest_account_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+        if !source_account.is_native() && source_account.amount != 0 {
+            return Err(ProtocolError::NonNativeHasBalance.into());
+        }
+
+        let authority = source_account
+            .close_authority
+            .unwrap_or(source_account.owner);
+        Self::validate_owner(
+            program_id,
+            &authority,
+            authority_info,
+            account_info_iter.as_slice(),
+        )?;
+
+        let dest_starting_lamports = dest_account_info.lamports();
+        **dest_account_info.lamports.borrow_mut() = dest_starting_lamports
+            .checked_add(source_account_info.lamports())
+            .ok_or(ProtocolError::Overflow)?;
+
+        **source_account_info.lamports.borrow_mut() = 0;
+        source_account.amount = 0;
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
+    /// Processes a [FreezeAccount](enum.TokenInstruction.html) or a
+    /// [ThawAccount](enum.TokenInstruction.html) instruction.
+    pub fn process_toggle_freeze_account(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        freeze: bool,
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let source_account_info = next_account_info(account_info_iter)?;
+        let mint_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+
+        let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
+        if freeze && source_account.is_frozen() || !freeze && !source_account.is_frozen() {
+            return Err(ProtocolError::InvalidState.into());
+        }
+        if source_account.is_native() {
+            return Err(ProtocolError::NativeNotSupported.into());
+        }
+        if mint_info.key != &source_account.mint {
+            return Err(ProtocolError::MintMismatch.into());
+        }
+
+        let mint = Mint::unpack(&mint_info.data.borrow_mut())?;
+        match mint.freeze_authority {
+            COption::Some(authority) => Self::validate_owner(
+                program_id,
+                &authority,
+                authority_info,
+                account_info_iter.as_slice(),
+            ),
+            COption::None => Err(ProtocolError::MintCannotFreeze.into()),
+        }?;
+
+        source_account.state = if freeze {
+            AccountState::Frozen
+        } else {
+            AccountState::Initialized
+        };
+
+        Account::pack(source_account, &mut source_account_info.data.borrow_mut())?;
+
+        Ok(())
+    }
+
     /// Validates owner(s) are present
     pub fn validate_owner(
         program_id: &Pubkey,
@@ -731,7 +761,7 @@ impl Processor {
         signers: &[AccountInfo],
     ) -> ProgramResult {
         if expected_owner != owner_account_info.key {
-            return Err(TokenError::OwnerMismatch.into());
+            return Err(ProtocolError::OwnerMismatch.into());
         }
         if program_id == owner_account_info.owner
             && owner_account_info.data_len() == Multisig::get_packed_len()
@@ -758,47 +788,6 @@ impl Processor {
             return Err(ProgramError::MissingRequiredSignature);
         }
         Ok(())
-    }
-}
-
-impl PrintProgramError for TokenError {
-    fn print<E>(&self)
-    where
-        E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
-    {
-        match self {
-            TokenError::NotRentExempt => msg!("Error: Lamport balance below rent-exempt threshold"),
-            TokenError::InsufficientFunds => msg!("Error: insufficient funds"),
-            TokenError::InvalidMint => msg!("Error: Invalid Mint"),
-            TokenError::MintMismatch => msg!("Error: Account not associated with this Mint"),
-            TokenError::OwnerMismatch => msg!("Error: owner does not match"),
-            TokenError::FixedSupply => msg!("Error: the total supply of this token is fixed"),
-            TokenError::AlreadyInUse => msg!("Error: account or token already in use"),
-            TokenError::InvalidNumberOfProvidedSigners => {
-                msg!("Error: Invalid number of provided signers")
-            }
-            TokenError::InvalidNumberOfRequiredSigners => {
-                msg!("Error: Invalid number of required signers")
-            }
-            TokenError::UninitializedState => msg!("Error: State is uninitialized"),
-            TokenError::NativeNotSupported => {
-                msg!("Error: Instruction does not support native tokens")
-            }
-            TokenError::NonNativeHasBalance => {
-                msg!("Error: Non-native account can only be closed if its balance is zero")
-            }
-            TokenError::InvalidInstruction => msg!("Error: Invalid instruction"),
-            TokenError::InvalidState => msg!("Error: Invalid account state for operation"),
-            TokenError::Overflow => msg!("Error: Operation overflowed"),
-            TokenError::AuthorityTypeNotSupported => {
-                msg!("Error: Account does not support specified authority type")
-            }
-            TokenError::MintCannotFreeze => msg!("Error: This token mint cannot freeze accounts"),
-            TokenError::AccountFrozen => msg!("Error: Account is frozen"),
-            TokenError::MintDecimalsMismatch => {
-                msg!("Error: decimals different from the Mint decimals")
-            }
-        }
     }
 }
 
@@ -836,7 +825,7 @@ mod tests {
     }
 
     fn return_token_error_as_program_error() -> ProgramError {
-        TokenError::MintMismatch.into()
+        ProtocolError::MintMismatch.into()
     }
 
     fn rent_sysvar() -> SolanaAccount {
@@ -858,7 +847,7 @@ mod tests {
     #[test]
     fn test_print_error() {
         let error = return_token_error_as_program_error();
-        error.print::<TokenError>();
+        error.print::<ProtocolError>();
     }
 
     #[test]
@@ -995,7 +984,7 @@ mod tests {
 
         // mint is not rent exempt
         assert_eq!(
-            Err(TokenError::NotRentExempt.into()),
+            Err(ProtocolError::NotRentExempt.into()),
             do_process_instruction(
                 initialize_mint(&program_id, &mint_key, &owner_key, None, 2).unwrap(),
                 vec![&mut mint_account, &mut rent_sysvar]
@@ -1013,7 +1002,7 @@ mod tests {
 
         // create twice
         assert_eq!(
-            Err(TokenError::AlreadyInUse.into()),
+            Err(ProtocolError::AlreadyInUse.into()),
             do_process_instruction(
                 initialize_mint(&program_id, &mint_key, &owner_key, None, 2,).unwrap(),
                 vec![&mut mint_account, &mut rent_sysvar]
@@ -1044,7 +1033,7 @@ mod tests {
 
         // account is not rent exempt
         assert_eq!(
-            Err(TokenError::NotRentExempt.into()),
+            Err(ProtocolError::NotRentExempt.into()),
             do_process_instruction(
                 initialize_account(&program_id, &account_key, &mint_key, &owner_key).unwrap(),
                 vec![
@@ -1060,7 +1049,7 @@ mod tests {
 
         // mint is not valid (not initialized)
         assert_eq!(
-            Err(TokenError::InvalidMint.into()),
+            Err(ProtocolError::InvalidMint.into()),
             do_process_instruction(
                 initialize_account(&program_id, &account_key, &mint_key, &owner_key).unwrap(),
                 vec![
@@ -1093,7 +1082,7 @@ mod tests {
 
         // create twice
         assert_eq!(
-            Err(TokenError::AlreadyInUse.into()),
+            Err(ProtocolError::AlreadyInUse.into()),
             do_process_instruction(
                 initialize_account(&program_id, &account_key, &mint_key, &owner_key).unwrap(),
                 vec![
@@ -1542,7 +1531,7 @@ mod tests {
 
         // mismatch mint
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -1563,7 +1552,7 @@ mod tests {
 
         // missing owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -1603,7 +1592,7 @@ mod tests {
 
         // insufficient funds
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 transfer(&program_id, &account_key, &account2_key, &owner_key, &[], 1).unwrap(),
                 vec![
@@ -1635,7 +1624,7 @@ mod tests {
 
         // incorrect decimals
         assert_eq!(
-            Err(TokenError::MintDecimalsMismatch.into()),
+            Err(ProtocolError::MintDecimalsMismatch.into()),
             do_process_instruction(
                 transfer_checked(
                     &program_id,
@@ -1659,7 +1648,7 @@ mod tests {
 
         // incorrect mint
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             do_process_instruction(
                 transfer_checked(
                     &program_id,
@@ -1704,7 +1693,7 @@ mod tests {
 
         // insufficient funds
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 transfer(&program_id, &account2_key, &account_key, &owner_key, &[], 1).unwrap(),
                 vec![
@@ -1755,7 +1744,7 @@ mod tests {
 
         // insufficient funds approved via delegate
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -1814,7 +1803,7 @@ mod tests {
 
         // insufficient funds in source account via delegate
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -2042,7 +2031,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2067,7 +2056,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2091,7 +2080,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2116,7 +2105,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2142,7 +2131,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::MintDecimalsMismatch.into()),
+            Err(ProtocolError::MintDecimalsMismatch.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2168,7 +2157,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2270,7 +2259,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2295,7 +2284,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             Processor::process(
                 &instruction.program_id,
                 &[
@@ -2423,7 +2412,7 @@ mod tests {
 
         // mint to 2, with incorrect decimals
         assert_eq!(
-            Err(TokenError::MintDecimalsMismatch.into()),
+            Err(ProtocolError::MintDecimalsMismatch.into()),
             do_process_instruction(
                 mint_to_checked(
                     &program_id,
@@ -2763,7 +2752,7 @@ mod tests {
 
         // no owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 approve(
                     &program_id,
@@ -2803,7 +2792,7 @@ mod tests {
 
         // approve delegate 2, with incorrect decimals
         assert_eq!(
-            Err(TokenError::MintDecimalsMismatch.into()),
+            Err(ProtocolError::MintDecimalsMismatch.into()),
             do_process_instruction(
                 approve_checked(
                     &program_id,
@@ -2827,7 +2816,7 @@ mod tests {
 
         // approve delegate 2, with incorrect mint
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             do_process_instruction(
                 approve_checked(
                     &program_id,
@@ -3067,7 +3056,7 @@ mod tests {
 
         // missing owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3100,7 +3089,7 @@ mod tests {
 
         // wrong authority type
         assert_eq!(
-            Err(TokenError::AuthorityTypeNotSupported.into()),
+            Err(ProtocolError::AuthorityTypeNotSupported.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3117,7 +3106,7 @@ mod tests {
 
         // account owner may not be set to None
         assert_eq!(
-            Err(TokenError::InvalidInstruction.into()),
+            Err(ProtocolError::InvalidInstruction.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3179,7 +3168,7 @@ mod tests {
 
         // wrong owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3212,7 +3201,7 @@ mod tests {
 
         // cannot freeze
         assert_eq!(
-            Err(TokenError::MintCannotFreeze.into()),
+            Err(ProtocolError::MintCannotFreeze.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3259,7 +3248,7 @@ mod tests {
 
         // test unsetting mint_authority is one-way operation
         assert_eq!(
-            Err(TokenError::FixedSupply.into()),
+            Err(ProtocolError::FixedSupply.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3305,7 +3294,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            Err(TokenError::MintCannotFreeze.into()),
+            Err(ProtocolError::MintCannotFreeze.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -3556,7 +3545,7 @@ mod tests {
 
         // mismatch account
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             do_process_instruction(
                 mint_to(&program_id, &mint_key, &mismatch_key, &owner_key, &[], 42).unwrap(),
                 vec![&mut mint_account, &mut mismatch_account, &mut owner_account],
@@ -3565,7 +3554,7 @@ mod tests {
 
         // missing owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 mint_to(&program_id, &mint_key, &account2_key, &owner2_key, &[], 42).unwrap(),
                 vec![
@@ -3612,7 +3601,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Err(TokenError::FixedSupply.into()),
+            Err(ProtocolError::FixedSupply.into()),
             do_process_instruction(
                 mint_to(&program_id, &mint_key, &account2_key, &owner_key, &[], 42).unwrap(),
                 vec![&mut mint_account, &mut account2_account, &mut owner_account],
@@ -3936,7 +3925,7 @@ mod tests {
             burn(&program_id, &account_key, &mint_key, &delegate_key, &[], 42).unwrap();
         instruction.accounts[1].is_signer = false;
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 instruction,
                 vec![
@@ -3949,7 +3938,7 @@ mod tests {
 
         // missing owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 burn(&program_id, &account_key, &mint_key, &owner2_key, &[], 42).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner2_account],
@@ -3958,7 +3947,7 @@ mod tests {
 
         // mint mismatch
         assert_eq!(
-            Err(TokenError::MintMismatch.into()),
+            Err(ProtocolError::MintMismatch.into()),
             do_process_instruction(
                 burn(&program_id, &mismatch_key, &mint_key, &owner_key, &[], 42).unwrap(),
                 vec![&mut mismatch_account, &mut mint_account, &mut owner_account],
@@ -3974,7 +3963,7 @@ mod tests {
 
         // burn_checked, with incorrect decimals
         assert_eq!(
-            Err(TokenError::MintDecimalsMismatch.into()),
+            Err(ProtocolError::MintDecimalsMismatch.into()),
             do_process_instruction(
                 burn_checked(&program_id, &account_key, &mint_key, &owner_key, &[], 21, 3).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner_account],
@@ -3995,7 +3984,7 @@ mod tests {
 
         // insufficient funds
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 burn(
                     &program_id,
@@ -4031,7 +4020,7 @@ mod tests {
 
         // not a delegate of source account
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 burn(
                     &program_id,
@@ -4065,7 +4054,7 @@ mod tests {
 
         // insufficient funds approved via delegate
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 burn(
                     &program_id,
@@ -4121,7 +4110,7 @@ mod tests {
         // multisig is not rent exempt
         let account_info_iter = &mut signer_accounts.iter_mut();
         assert_eq!(
-            Err(TokenError::NotRentExempt.into()),
+            Err(ProtocolError::NotRentExempt.into()),
             do_process_instruction(
                 initialize_multisig(&program_id, &multisig_key, &[&signer_keys[0]], 1).unwrap(),
                 vec![
@@ -4830,7 +4819,7 @@ mod tests {
 
         // close non-native account with balance
         assert_eq!(
-            Err(TokenError::NonNativeHasBalance.into()),
+            Err(ProtocolError::NonNativeHasBalance.into()),
             do_process_instruction(
                 close_account(&program_id, &account_key, &account3_key, &owner_key, &[]).unwrap(),
                 vec![
@@ -4851,7 +4840,7 @@ mod tests {
 
         // wrong owner
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 close_account(&program_id, &account_key, &account3_key, &owner2_key, &[]).unwrap(),
                 vec![
@@ -4918,7 +4907,7 @@ mod tests {
 
         // account owner cannot authorize close if close_authority is set
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 close_account(&program_id, &account_key, &account3_key, &owner_key, &[]).unwrap(),
                 vec![
@@ -5031,7 +5020,7 @@ mod tests {
 
         // mint_to unsupported
         assert_eq!(
-            Err(TokenError::NativeNotSupported.into()),
+            Err(ProtocolError::NativeNotSupported.into()),
             do_process_instruction(
                 mint_to(
                     &program_id,
@@ -5057,7 +5046,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            Err(TokenError::NativeNotSupported.into()),
+            Err(ProtocolError::NativeNotSupported.into()),
             do_process_instruction(
                 burn(
                     &program_id,
@@ -5078,7 +5067,7 @@ mod tests {
 
         // ensure can't transfer below rent-exempt reserve
         assert_eq!(
-            Err(TokenError::InsufficientFunds.into()),
+            Err(ProtocolError::InsufficientFunds.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -5221,7 +5210,7 @@ mod tests {
 
         // attempt to mint one more to account
         assert_eq!(
-            Err(TokenError::Overflow.into()),
+            Err(ProtocolError::Overflow.into()),
             do_process_instruction(
                 mint_to(
                     &program_id,
@@ -5244,7 +5233,7 @@ mod tests {
 
         // atttempt to mint one more to the other account
         assert_eq!(
-            Err(TokenError::Overflow.into()),
+            Err(ProtocolError::Overflow.into()),
             do_process_instruction(
                 mint_to(
                     &program_id,
@@ -5298,7 +5287,7 @@ mod tests {
         Account::pack(account, &mut account2_account.data).unwrap();
 
         assert_eq!(
-            Err(TokenError::Overflow.into()),
+            Err(ProtocolError::Overflow.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -5383,7 +5372,7 @@ mod tests {
         account.state = AccountState::Frozen;
         Account::pack(account, &mut account2_account.data).unwrap();
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -5409,7 +5398,7 @@ mod tests {
         account.state = AccountState::Frozen;
         Account::pack(account, &mut account2_account.data).unwrap();
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 transfer(
                     &program_id,
@@ -5435,7 +5424,7 @@ mod tests {
         let delegate_key = Pubkey::new_unique();
         let mut delegate_account = SolanaAccount::default();
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 approve(
                     &program_id,
@@ -5460,7 +5449,7 @@ mod tests {
         account.delegated_amount = 100;
         Account::pack(account, &mut account_account.data).unwrap();
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 revoke(&program_id, &account_key, &owner_key, &[]).unwrap(),
                 vec![&mut account_account, &mut owner_account],
@@ -5470,7 +5459,7 @@ mod tests {
         // no set authority if account is frozen
         let new_owner_key = Pubkey::new_unique();
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 set_authority(
                     &program_id,
@@ -5487,7 +5476,7 @@ mod tests {
 
         // no mint_to if destination account is frozen
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 mint_to(&program_id, &mint_key, &account_key, &owner_key, &[], 100).unwrap(),
                 vec![&mut mint_account, &mut account_account, &mut owner_account,],
@@ -5496,7 +5485,7 @@ mod tests {
 
         // no burn if account is frozen
         assert_eq!(
-            Err(TokenError::AccountFrozen.into()),
+            Err(ProtocolError::AccountFrozen.into()),
             do_process_instruction(
                 burn(&program_id, &account_key, &mint_key, &owner_key, &[], 100).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner_account],
@@ -5616,7 +5605,7 @@ mod tests {
 
         // mint cannot freeze
         assert_eq!(
-            Err(TokenError::MintCannotFreeze.into()),
+            Err(ProtocolError::MintCannotFreeze.into()),
             do_process_instruction(
                 freeze_account(&program_id, &account_key, &mint_key, &owner_key, &[]).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner_account],
@@ -5628,7 +5617,7 @@ mod tests {
         mint.freeze_authority = COption::Some(owner_key);
         Mint::pack(mint, &mut mint_account.data).unwrap();
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 freeze_account(&program_id, &account_key, &mint_key, &owner2_key, &[]).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner2_account],
@@ -5637,7 +5626,7 @@ mod tests {
 
         // check explicit thaw
         assert_eq!(
-            Err(TokenError::InvalidState.into()),
+            Err(ProtocolError::InvalidState.into()),
             do_process_instruction(
                 thaw_account(&program_id, &account_key, &mint_key, &owner2_key, &[]).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner2_account],
@@ -5655,7 +5644,7 @@ mod tests {
 
         // check explicit freeze
         assert_eq!(
-            Err(TokenError::InvalidState.into()),
+            Err(ProtocolError::InvalidState.into()),
             do_process_instruction(
                 freeze_account(&program_id, &account_key, &mint_key, &owner_key, &[]).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner_account],
@@ -5664,7 +5653,7 @@ mod tests {
 
         // check thaw authority
         assert_eq!(
-            Err(TokenError::OwnerMismatch.into()),
+            Err(ProtocolError::OwnerMismatch.into()),
             do_process_instruction(
                 thaw_account(&program_id, &account_key, &mint_key, &owner2_key, &[]).unwrap(),
                 vec![&mut account_account, &mut mint_account, &mut owner2_account],
