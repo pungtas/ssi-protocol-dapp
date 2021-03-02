@@ -38,11 +38,10 @@ impl Processor {
             }
             TokenInstruction::InitializeMint {
                 decimals,
-                mint_authority,
-                freeze_authority,
+                mint_authority
             } => {
                 msg!("Instruction: InitializeMint");
-                Self::process_initialize_mint(accounts, decimals, mint_authority, freeze_authority)
+                Self::process_initialize_mint(accounts, decimals, mint_authority)
             }
             TokenInstruction::InitializeAccount => {
                 msg!("Instruction: InitializeAccount");
@@ -115,7 +114,7 @@ impl Processor {
         accounts: &[AccountInfo],
         amount: u64,
         expected_decimals: Option<u8>,
-        message: Message
+        message: &[u8]
     ) -> ProgramResult {
         if accounts.len() == 0 {
             Err(ProtocolError::NoAccountsPassed)?
@@ -143,9 +142,10 @@ impl Processor {
         let dest_account_info = next_account_info(account_info_iter)?;
         let authority_info = next_account_info(account_info_iter)?;
         
+        let new_message = Message::unpack(message)?;
         let mut queue_ref = dest_account_info.try_borrow_mut_data()?;
         let message_buffer = MessageBuffer::unpack(&mut *queue_ref)?;
-        message_buffer.append(&message);
+        message_buffer.append(&new_message);
 
         let mut source_account = Account::unpack(&source_account_info.data.borrow())?;
         let mut dest_account = Account::unpack(&dest_account_info.data.borrow())?;
@@ -240,7 +240,6 @@ impl Processor {
         accounts: &[AccountInfo],
         decimals: u8,
         mint_authority: Pubkey,
-        freeze_authority: COption<Pubkey>,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let mint_info = next_account_info(account_info_iter)?;
@@ -259,7 +258,6 @@ impl Processor {
         mint.mint_authority = COption::Some(mint_authority);
         mint.decimals = decimals;
         mint.is_initialized = true;
-        mint.freeze_authority = freeze_authority;
 
         Mint::pack(mint, &mut mint_info.data.borrow_mut())?;
 

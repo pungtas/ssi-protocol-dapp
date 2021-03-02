@@ -22,7 +22,7 @@ pub const MAX_SIGNERS: usize = 11;
 /// Instructions supported by the token program.
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
-pub enum TokenInstruction {
+pub enum TokenInstruction <'a> {
     /// Initializes a new mint and optionally deposits all the newly minted
     /// tokens in an account.
     ///
@@ -42,8 +42,6 @@ pub enum TokenInstruction {
         decimals: u8,
         /// The authority/multisignature to mint tokens.
         mint_authority: Pubkey,
-        /// The freeze authority/multisignature of the mint.
-        freeze_authority: COption<Pubkey>,
     },
     /// Initializes a new account to hold tokens.  If this account is associated
     /// with the native mint then the token balance of the initialized account
@@ -108,7 +106,7 @@ pub enum TokenInstruction {
     Transfer {
         /// The amount of tokens to transfer.
         amount: u64,
-        message: Message
+        message: &'a[u8]
     },
     /// Approves a delegate.  A delegate is given the authority over tokens on
     /// behalf of the source account's owner.
@@ -274,7 +272,7 @@ pub enum TokenInstruction {
         amount: u64,
         /// Expected number of base 10 digits to the right of the decimal place.
         decimals: u8,
-        message: Message
+        message: &'a[u8]
     },
     /// Approves a delegate.  A delegate is given the authority over tokens on
     /// behalf of the source account's owner.
@@ -369,21 +367,19 @@ pub enum TokenInstruction {
         owner: Pubkey,
     },
 }
-impl TokenInstruction {
+impl <'a> TokenInstruction <'a> {
     /// Unpacks a byte buffer into a [TokenInstruction](enum.TokenInstruction.html).
-    pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
+    pub fn unpack(input: &'a[u8]) -> Result<Self, ProgramError> {
         use ProtocolError::InvalidInstruction;
 
         let (&tag, rest) = input.split_first().ok_or(InvalidInstruction)?;
         Ok(match tag {
             0 => {
                 let (&decimals, rest) = rest.split_first().ok_or(InvalidInstruction)?;
-                let (mint_authority, rest) = Self::unpack_pubkey(rest)?;
-                let (freeze_authority, _rest) = Self::unpack_pubkey_option(rest)?;
+                let (mint_authority, _rest) = Self::unpack_pubkey(rest)?;
                 Self::InitializeMint {
-                    mint_authority,
-                    freeze_authority,
                     decimals,
+                    mint_authority,
                 }
             },
             1 => Self::InitializeAccount,
@@ -392,19 +388,16 @@ impl TokenInstruction {
                 Self::InitializeMultisig { m }
             },
             3 => {
-                let (amount, msg) = rest.split_at(8);
+                let (amount, message) = rest.split_at(8);
                 let amount = amount
                     .try_into()
                     .ok()
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let message = Message::unpack(msg)?;
                 Self::Transfer {
                     amount,
                     message
                 }
-                
-
             },
             4 | 7 | 8 => {
                 let amount = rest
@@ -442,9 +435,7 @@ impl TokenInstruction {
                     .ok()
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let (&decimals, msg) = rest.split_first().ok_or(InvalidInstruction)?;
-                let message = Message::unpack(msg)?;
-
+                let (&decimals, message ) = rest.split_first().ok_or(InvalidInstruction)?;
                 Self::TransferChecked { amount, decimals, message }
             }
             13 => {
@@ -494,14 +485,12 @@ impl TokenInstruction {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match self {
             &Self::InitializeMint {
-                ref mint_authority,
-                ref freeze_authority,
                 decimals,
+                ref mint_authority,
             } => {
                 buf.push(0);
                 buf.push(decimals);
                 buf.extend_from_slice(mint_authority.as_ref());
-                Self::pack_pubkey_option(freeze_authority, &mut buf);
             }
             Self::InitializeAccount => buf.push(1),
             &Self::InitializeMultisig { m } => {
@@ -648,14 +637,11 @@ pub fn initialize_mint(
     token_program_id: &Pubkey,
     mint_pubkey: &Pubkey,
     mint_authority_pubkey: &Pubkey,
-    freeze_authority_pubkey: Option<&Pubkey>,
     decimals: u8,
 ) -> Result<Instruction, ProgramError> {
-    let freeze_authority = freeze_authority_pubkey.cloned().into();
     let data = TokenInstruction::InitializeMint {
-        mint_authority: *mint_authority_pubkey,
-        freeze_authority,
         decimals,
+        mint_authority: *mint_authority_pubkey,
     }
     .pack();
 
@@ -756,7 +742,7 @@ pub fn transfer(
     authority_pubkey: &Pubkey,
     signer_pubkeys: &[&Pubkey],
     amount: u64,
-    message: Message
+    message: &[u8]
 ) -> Result<Instruction, ProgramError> {
     let data = TokenInstruction::Transfer{
         amount,
@@ -1022,7 +1008,7 @@ pub fn transfer_checked(
     signer_pubkeys: &[&Pubkey],
     amount: u64,
     decimals: u8,
-    message: Message
+    message: &[u8]
 ) -> Result<Instruction, ProgramError> {
     let data = TokenInstruction::TransferChecked { amount, decimals, message }.pack();
 
@@ -1152,7 +1138,6 @@ mod test {
         let check = TokenInstruction::InitializeMint {
             decimals: 2,
             mint_authority: Pubkey::new(&[1u8; 32]),
-            freeze_authority: COption::None,
         };
         let packed = check.pack();
         let mut expect = Vec::from([0u8, 2]);
@@ -1165,7 +1150,6 @@ mod test {
         let check = TokenInstruction::InitializeMint {
             decimals: 2,
             mint_authority: Pubkey::new(&[2u8; 32]),
-            freeze_authority: COption::Some(Pubkey::new(&[3u8; 32])),
         };
         let packed = check.pack();
         let mut expect = vec![0u8, 2];

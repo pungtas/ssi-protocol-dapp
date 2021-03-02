@@ -10,7 +10,7 @@ pub const MESSAGE_HISTORY: usize = 128;
  * Basic on-chain message struct - defines layout of the message
  */
 #[repr(packed)]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct Message {
     /// Key of the writer of the transaction
     pub writer: Pubkey,

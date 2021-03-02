@@ -84,7 +84,7 @@ export const styles = ReactNative.StyleSheet.create({
 		fontFamily: 'Ubuntu'
 	},
 	button: {
-		marginBottom: 50,
+		marginBottom: 25,
 		backgroundColor: 'white',
 		padding: 5,
 		borderRadius: 5,

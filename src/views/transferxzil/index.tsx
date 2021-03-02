@@ -6,8 +6,14 @@ import * as DidResolver from 'tyronzil-js/dist/did/operations/did-resolve/resolv
 import * as TyronZIL from 'tyronzil-js/dist/blockchain/tyronzil';
 import * as zcrypto from '@zilliqa-js/crypto';
 import * as zutil from '@zilliqa-js/util';
-import { Transaction } from '@zilliqa-js/account';
+import * as zil from '@zilliqa-js/account';
 import * as SsiState from 'tyronzil-js/dist/blockchain/ssi-state';
+import tyronsol, { TransitionTag } from "../../transactions/tyronsol";
+import { Account, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction } from "@solana/web3.js";
+import * as Instructions from "../../instructions";
+import BN from 'bn.js';
+import { establishConnection } from "../../client/init";
+import { newAccountWithLamports } from "../../client/util/new-account-with-lamports";
 
 var hash = require('hash.js');
 
@@ -22,8 +28,10 @@ export const TransferXZilView = () => {
 	const [amount, setAmount] = React.useState("");
 	const STATE = { loading: false };
 	const [state, setState] = React.useState(STATE);
+	const e = [{}]
+	const [receipt, setReceipt] = React.useState(e);
 
-  	return (
+	return (
     <ReactNative.View style={ Themed.styles.pungMeContainer }>
 		<ReactNative.Text style={ Themed.styles.title }>xTransfer</ReactNative.Text>
 		<Themed.View style={ Themed.styles.separator } lightColor="#e8e357" darkColor="#e8e357" />
@@ -46,10 +54,9 @@ export const TransferXZilView = () => {
 			onChangeText = { (amount: any) => { setAmount(amount) }}
 		/>
 		<Submit
-		content = {`Sign with your SSI key`}
+		content = {`Sign with your SSI Key`}
 		state = { state }
 		onSubmission = { async() => {
-			alert("Send FATF travel rule message")
 			setState({
 				loading: true
 			});
@@ -104,10 +111,107 @@ export const TransferXZilView = () => {
 				);
 				
 				let RECEIPT;
-				if (transaction instanceof Transaction) {
-					RECEIPT = transaction.getReceipt();
-					alert!(`Transfer on Zilliqa consumed ${RECEIPT!.cumulative_gas} units of gas. Receipt: ${JSON.stringify(RECEIPT, null, 2)}`);
+				let xZIL_params;
+				if (transaction instanceof zil.Transaction) {
+					const tx = transaction as zil.Transaction;
+					RECEIPT = tx.getReceipt();
+					xZIL_params = RECEIPT?.event_logs[0].params;
+					alert!(`Transfer on Zilliqa consumed ${RECEIPT!.cumulative_gas} units of gas. Event: ${JSON.stringify(xZIL_params, null, 2)}`);
+					setReceipt(xZIL_params!);
 				}
+
+				setState({
+					loading: false
+				});
+			})
+			.catch((_err: any) => { alert!(`${_err}`) })
+		}}
+		/>
+		<Submit
+		content = {`Send FATF Travel Rule message`}
+		state = { state }
+		onSubmission = { async() => {
+			setState({
+				loading: true
+			});
+			
+			let originator_sol: PublicKey;
+			let beneficiary_sol: PublicKey;
+			let transfer_amount;
+			/*
+			for(const object of receipt) {
+				switch (object.vname) {
+					case "originator":
+						originator_sol = new PublicKey(object.value)
+						break;
+					case "beneficiary":
+						beneficiary_sol = new PublicKey(object.value)
+						break;
+					case "amount":
+						transfer_amount = object.value
+						break;
+				}
+			}
+
+			const connection = await establishConnection();
+			const controller = await newAccountWithLamports(connection, 1e12);
+			const program = new PublicKey("E3thxfAbr9CwXQPRi6XzG5SkxEaaxsky4LBxwe5wPjrs");
+			const mint = new Account();
+			const mintAccountSpace = 82;
+			const mintAccountLamports = await connection.getMinimumBalanceForRentExemption(mintAccountSpace);
+		
+			const tag = TransitionTag.MintTo;
+			const mintToParams: Instructions.MintToParams = {
+				mint: mint.publicKey,
+				destination: originator_sol!,
+				amount: new BN(transfer_amount),
+				mintAuthority: controller.publicKey,
+			};
+			const params = { MintTo: mintToParams };
+			const transaction_instruction = await tyronsol.transactionData(tag, params, program);
+			await sendAndConfirmTransaction(
+				connection,
+				new Transaction().add(
+					SystemProgram.createAccount({
+						fromPubkey: controller.publicKey,
+						newAccountPubkey: mint.publicKey,
+						space: mintAccountSpace,
+						lamports: mintAccountLamports,
+						programId: program,
+					}),
+					transaction_instruction
+				),
+				[controller, mint],
+				{
+					skipPreflight: false,
+					commitment: 'recent',
+					preflightCommitment: 'recent',
+				}
+			).then( result => alert!(`Result is: ${result}`))
+			.catch((_err: any) => { alert!(`Error: ${_err}`) })
+
+				const x_tag = TransitionTag.Transfer;
+				const msg = ["hola"];
+				const transferParams: Instructions.TransferParams = {
+					originator: originator_sol!,
+					beneficiary: beneficiary_sol!,
+					amount: new BN(transfer_amount),
+					controller: controller.publicKey,
+					message: msg
+				};
+				const x_params = { Transfer: transferParams };
+				const x_transaction_instruction = await tyronsol.transactionData(x_tag, x_params, program);
+				await sendAndConfirmTransaction(
+					connection,
+					new Transaction().add(x_transaction_instruction),
+					[controller], 
+					{
+						skipPreflight: false,
+						commitment: 'recent',
+						preflightCommitment: 'recent',
+					}
+				).then( result => alert!(`Result is: ${result}`))
+				.catch((_err: any) => { alert!(`Error: ${_err}`) })
 
 				setState({
 					loading: false
@@ -115,10 +219,8 @@ export const TransferXZilView = () => {
 				setOriginator("");
 				setBeneficiary("");
 				setAmount("");
-				return RECEIPT;
-			})
-			.catch((_err: any) => { alert!(`${_err}`) })			
-		}}
+				*/
+			}}
 		/>
 	</ReactNative.View>
   );
