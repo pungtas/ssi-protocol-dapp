@@ -2,13 +2,17 @@
 
 ```own your data, empower your world```
 
-Welcome to the open-source dapp for the [Self-Sovereign Identity (SSI) Protocol](https://www.ssiprotocol.com).
+Welcome to the open-source dapp for this [Self-Sovereign Identity (SSI) Protocol](https://www.ssiprotocol.com).
 
 ## xTransfer
+
+The Self-Sovereign Identity can operate in Zilliqa and Solana, and xTransfers on the latter include a Travel Rule message.
 
 Send $ZIL over an SSI Bridge and transfer it on Solana as a wrapped cryptocurrency named xZIL. Transfer this virtual asset along with the originator's personal information to Counter-Terrorism Financing (CTF) and Anti-Money Laundering (AML). This message powered on Solana is encrypted so that only the beneficiary can read it.
 
 Virtual Asset Service Providers (VASPs) involved in an xTransfer comply with the data-sharing requirements stipulated by the Financial Action Task Force (FATF) Travel Rule while focusing on principle #7 of Privacy by Design: "Respect for user privacy — keep it user-centric".
+
+xTransfer can be implemented for any token on Solana, Zilliqa and potentially others, making Tyron a multichain platform.
 
 The SSI Protocol aims to integrate the following specifications:
 
@@ -41,12 +45,6 @@ npm i --legacy-peer-deps
 npm run build
 ```
 
-After building, go to tsconfig.json and make sure that **"module": "commonjs"**
-
-```bash
-npm start
-```
-
 ### Build the program
 
 ```bash
@@ -63,17 +61,27 @@ cargo build-bpf
 
 ### Deploy the SSI Protocol Program on Solana
 
-Start a local Solana cluster:
+```bash
+npm run cluster:devnet
+```
 
 ```bash
-solana-test-validator --log
+npm run solana
 ```
 
 Deploy the SSI Protocol Program:
 
+> Make sure that **"module": "commonjs"** in tsconfig.json
+
 ```bash
 npm run deploy:program
 ```
+
+![deploy:program](./src/assets/images/deploy:program.png)
+
+The controller is the relayer, and controls the account submitting metatransactions to the Self-Sovereign Identity (also pays for the gas). The controller entity is part of the W3C DIDs specification, and in this SSI Protocol is also called Agent (similar to Hyperledger).
+
+The originator and beneficiary got also initialized into the SSI Program. Users must provide a Solana address to their self-sovereign identities.
 
 ### Run the application
 
@@ -82,7 +90,7 @@ npm run start
 ```
 
 ## Testing
-
+>
 The SSI key pair is necessary for the [Self-Sovereign Identity smart contract](https://viewblock.io/zilliqa/address/zil1alcdyfq8e2un2unj9zh5hejq2ktu9enfmlmvkr?network=testnet&tab=code) to process the order after verifying the signature on-chain.
 
 Private key:

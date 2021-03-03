@@ -1,31 +1,21 @@
 import { Connection, Account, PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { establishConnection, establishController, loadProgram } from "../client/init";
-import { Store } from '../client/util/store';
+import { establishConnection, establishController } from "../client/init";
 import * as Instructions from "../instructions";
+import { TokenAccountLayout } from "../instructions";
 
 /** tyronsol transaction class */
 export default class tyronsol{
 	public readonly connection: Connection;
 	public readonly controller: Account;
-    public readonly program: PublicKey;
-    public readonly mint: Account;
-    public readonly originator: Account;
-    public readonly beneficiary: Account;
-    
+    public readonly program = "";
+    public readonly mint = "";
+     
 	private constructor(
 		connection: Connection,
         controller: Account,
-        program: PublicKey,
-        mint: Account,
-        originator: Account,
-        beneficiary: Account,
 	) {
 		this.connection = connection;
         this.controller = controller;
-        this.program = program;  
-        this.mint = mint;
-        this.originator = originator;
-        this.beneficiary = beneficiary;
 	}
 
 	public static async initialize(
@@ -34,31 +24,16 @@ export default class tyronsol{
         .then( async connection => {
             const x = await establishController(connection)
             .then( async (controller: Account) => {
-                const mint = new Account();
-                const originator = new Account();
-                const beneficiary = new Account();
-                await loadProgram(connection, controller, mint, originator, beneficiary);
-            
-                const store = new Store();
-                const config = await store.load('config.json');
-                const program = new PublicKey(config.programId);
-
+                
                 return {
+                    connection,
                     controller,
-                    program,
-                    mint,
-                    originator,
-                    beneficiary
                 }
             })
                 
             return new tyronsol(
                 connection,
                 x.controller,
-                x.program,
-                x.mint,
-                x.originator,
-                x.beneficiary
             );
             
         }).catch( err => { throw err });
@@ -98,6 +73,13 @@ export default class tyronsol{
                 break;
         }
 		return transaction_instruction!;
+    }
+    public static async getMinBalanceRentForExemptAccount(
+        connection: Connection,
+        ): Promise<number> {
+        return await connection.getMinimumBalanceForRentExemption(
+            TokenAccountLayout.span,
+        );
     }
 }
 

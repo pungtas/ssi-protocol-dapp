@@ -5,7 +5,6 @@ import {
 } from '@solana/web3.js';
 import BN from 'bn.js';
 import {
-  option,
   publicKey,
   rustEnum,
   u64,

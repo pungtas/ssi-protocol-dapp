@@ -5,7 +5,7 @@ import * as Scheme from 'tyronzil-js/dist/did/tyronZIL-schemes/did-scheme';
 import * as DidResolver from 'tyronzil-js/dist/did/operations/did-resolve/resolver';
 import * as TyronZIL from 'tyronzil-js/dist/blockchain/tyronzil';
 import * as zcrypto from '@zilliqa-js/crypto';
-import * as zutil from '@zilliqa-js/util';
+import { BN as zilBN } from '@zilliqa-js/util';
 import * as zil from '@zilliqa-js/account';
 import * as SsiState from 'tyronzil-js/dist/blockchain/ssi-state';
 import tyronsol, { TransitionTag } from "../../transactions/tyronsol";
@@ -14,6 +14,7 @@ import * as Instructions from "../../instructions";
 import BN from 'bn.js';
 import { establishConnection } from "../../client/init";
 import { newAccountWithLamports } from "../../client/util/new-account-with-lamports";
+import { TokenInstructionLayout } from "../../instructions";
 
 var hash = require('hash.js');
 
@@ -28,8 +29,8 @@ export const TransferXZilView = () => {
 	const [amount, setAmount] = React.useState("");
 	const STATE = { loading: false };
 	const [state, setState] = React.useState(STATE);
-	const e = [{}]
-	const [receipt, setReceipt] = React.useState(e);
+	const [state2, setState2] = React.useState(STATE);
+	const [receipt, setReceipt] = React.useState("");
 
 	return (
     <ReactNative.View style={ Themed.styles.pungMeContainer }>
@@ -54,7 +55,7 @@ export const TransferXZilView = () => {
 			onChangeText = { (amount: any) => { setAmount(amount) }}
 		/>
 		<Submit
-		content = {`Sign with your SSI Key`}
+		content = {`Sign with your SSI Key to send ${amount} $ZIL to the bridge`}
 		state = { state }
 		onSubmission = { async() => {
 			setState({
@@ -74,7 +75,7 @@ export const TransferXZilView = () => {
 			const PRIVATE_KEY = zcrypto.normalizePrivateKey(SSIkey);
 			const PUBLIC_KEY = zcrypto.getPubKeyFromPrivateKey(PRIVATE_KEY);
 			
-			const amount_bn = new zutil.BN(amount);
+			const amount_bn = new zilBN(amount);
 			const uint_amt = Uint8Array.from(amount_bn.toArrayLike(Buffer, undefined, 16));
 			
 			const to_hash = hash.sha256().update(Buffer.from(solana_addr)).digest('hex');
@@ -110,14 +111,12 @@ export const TransferXZilView = () => {
 					input.params
 				);
 				
-				let RECEIPT;
-				let xZIL_params;
 				if (transaction instanceof zil.Transaction) {
 					const tx = transaction as zil.Transaction;
-					RECEIPT = tx.getReceipt();
-					xZIL_params = RECEIPT?.event_logs[0].params;
-					alert!(`Transfer on Zilliqa consumed ${RECEIPT!.cumulative_gas} units of gas. Event: ${JSON.stringify(xZIL_params, null, 2)}`);
-					setReceipt(xZIL_params!);
+					const RECEIPT = tx.getReceipt() as zil.TxReceipt;
+					const xZIL_event = RECEIPT?.event_logs[0];
+					alert!(`Transfer on Zilliqa consumed ${RECEIPT!.cumulative_gas} units of gas. \n Event: ${JSON.stringify(xZIL_event, null, 2)}`);
+					setReceipt(JSON.stringify(RECEIPT));
 				}
 
 				setState({
@@ -128,18 +127,21 @@ export const TransferXZilView = () => {
 		}}
 		/>
 		<Submit
-		content = {`Send FATF Travel Rule message`}
-		state = { state }
+		content = {`Send FATF Travel Rule message along with ${amount} xZIL to ${beneficiary}`}
+		state = { state2 }
 		onSubmission = { async() => {
-			setState({
+			setState2({
 				loading: true
 			});
 			
 			let originator_sol: PublicKey;
 			let beneficiary_sol: PublicKey;
 			let transfer_amount;
-			/*
-			for(const object of receipt) {
+
+			const RECEIPT = JSON.parse(receipt) as zil.TxReceipt;
+			const receipt_params = RECEIPT.event_logs[0].params;
+
+			for(const object of receipt_params) {
 				switch (object.vname) {
 					case "originator":
 						originator_sol = new PublicKey(object.value)
@@ -152,10 +154,19 @@ export const TransferXZilView = () => {
 						break;
 				}
 			}
+			alert!(`${originator}, ${beneficiary}, ${transfer_amount}`)
 
 			const connection = await establishConnection();
 			const controller = await newAccountWithLamports(connection, 1e12);
 			const program = new PublicKey("E3thxfAbr9CwXQPRi6XzG5SkxEaaxsky4LBxwe5wPjrs");
+
+			const x = await tyronsol.initialize();
+
+			const account_space =  TokenInstructionLayout.span;
+			const account_lamports = await x.connection.getMinimumBalanceForRentExemption(
+				TokenInstructionLayout.span,
+			);
+			
 			const mint = new Account();
 			const mintAccountSpace = 82;
 			const mintAccountLamports = await connection.getMinimumBalanceForRentExemption(mintAccountSpace);
@@ -213,13 +224,12 @@ export const TransferXZilView = () => {
 				).then( result => alert!(`Result is: ${result}`))
 				.catch((_err: any) => { alert!(`Error: ${_err}`) })
 
-				setState({
+				setState2({
 					loading: false
 				});
 				setOriginator("");
 				setBeneficiary("");
 				setAmount("");
-				*/
 			}}
 		/>
 	</ReactNative.View>

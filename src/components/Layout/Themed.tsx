@@ -86,8 +86,8 @@ export const styles = ReactNative.StyleSheet.create({
 	button: {
 		marginBottom: 25,
 		backgroundColor: 'white',
-		padding: 5,
-		borderRadius: 5,
+		padding: 0,
+		borderRadius: 3,
 		alignItems: 'center',
 		flexDirection: 'row-reverse'
 	},
