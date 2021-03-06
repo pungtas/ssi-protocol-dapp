@@ -61,6 +61,14 @@ cargo build-bpf
 
 ### Deploy the SSI Protocol Program on Solana
 
+#### Devnet
+
+```bash
+npm run cluster:devnet
+```
+
+#### Localnet
+
 ```bash
 npm run cluster:devnet
 ```
@@ -68,6 +76,8 @@ npm run cluster:devnet
 ```bash
 npm run solana
 ```
+
+---
 
 Deploy the SSI Protocol Program:
 
@@ -79,9 +89,11 @@ npm run deploy:program
 
 ![deploy:program](./src/assets/images/deploy:program.png)
 
-The controller is the relayer, and controls the account submitting metatransactions to the Self-Sovereign Identity (also pays for the gas). The controller entity is part of the W3C DIDs specification, and in this SSI Protocol is also called Agent (similar to Hyperledger).
+A Self-Sovereign Identity (SSI) must get initialized into the SSI Solana Program. For that the user must posses and provide a Solana address to their Self-Sovereign Identy - so that an SSI Agent can send an xTransfer to the beneficiary, which also has the Travel Rule message encrypted into it.
 
-The originator and beneficiary got also initialized into the SSI Program. Users must provide a Solana address to their self-sovereign identities.
+The SSI Agent is the relayer that submits metatransactions and connects the blockchains over the SSI Bridge, paying for the gas. A Self-Sovereign Identity can authorize multiple agents into its code.
+
+An SSI Agent makes metatransactions for the user's SSI, such as xTransfers and [social recovery wallet](https://vitalik.ca/general/2021/01/11/recovery.html).
 
 ### Run the application
 
@@ -90,7 +102,7 @@ npm run start
 ```
 
 ## Testing
->
+
 The SSI key pair is necessary for the [Self-Sovereign Identity smart contract](https://viewblock.io/zilliqa/address/zil1alcdyfq8e2un2unj9zh5hejq2ktu9enfmlmvkr?network=testnet&tab=code) to process the order after verifying the signature on-chain.
 
 Private key:

@@ -1,14 +1,13 @@
 import { Connection, Account, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { establishConnection, establishController } from "../client/init";
 import * as Instructions from "../instructions";
-import { TokenAccountLayout } from "../instructions";
 
 /** tyronsol transaction class */
 export default class tyronsol{
 	public readonly connection: Connection;
 	public readonly controller: Account;
-    public readonly program = "";
-    public readonly mint = "";
+    public readonly program = new PublicKey("2ekQTdfPjgeFuLXjRptxuk8pKj3YGzpw5rozRzSADGCE");
+    public readonly mint = new PublicKey("9VNJQywv7RdUZZqEHtVMtzuN6FyHeMztcWnrNkivTqw");
      
 	private constructor(
 		connection: Connection,
@@ -76,9 +75,11 @@ export default class tyronsol{
     }
     public static async getMinBalanceRentForExemptAccount(
         connection: Connection,
+        layout: any,
         ): Promise<number> {
         return await connection.getMinimumBalanceForRentExemption(
-            TokenAccountLayout.span,
+            layout.span as number,
+            "recent"
         );
     }
 }

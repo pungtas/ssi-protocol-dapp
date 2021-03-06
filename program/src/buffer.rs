@@ -2,7 +2,7 @@ use crate::error::ProtocolError;
 use solana_program::pubkey::Pubkey;
 
 /// Number of bytes allowed per message
-pub const MESSAGE_LENGTH: usize = 255;
+pub const MESSAGE_LENGTH: usize = 1;
 /// Number of messages kept in the history
 pub const MESSAGE_HISTORY: usize = 128;
 
@@ -63,7 +63,7 @@ impl MessageBuffer {
 
 impl Message {
     pub fn unpack(input: &[u8]) -> Result<Message, ProtocolError> {
-        if input.len() > std::mem::size_of::<Message>() {
+        /*if input.len() > std::mem::size_of::<Message>() {
             Err(ProtocolError::MessageTooLarge)?;
         }
         if input.len() < std::mem::size_of::<Message>() {
@@ -71,7 +71,7 @@ impl Message {
         }
 
         assert_eq!(input.len(), std::mem::size_of::<Message>());
-
+        */
         let (key, rest) = input.split_at(std::mem::size_of::<Pubkey>());
         let (length, rest) = rest.split_first().unwrap();
 

@@ -14,7 +14,6 @@ import fs from 'mz/fs';
 import { url, urlTls } from './util/url';
 import { Store } from './util/store';
 import { newAccountWithLamports } from './util/new-account-with-lamports';
-import { TokenAccount } from '../instructions';
 
 let connection: Connection;
 let programId: PublicKey;
@@ -59,8 +58,7 @@ export async function establishController(connection: Connection): Promise<Accou
  */
 export async function loadProgram(
   connection: Connection,
-  controller: Account,
-  mint: Account,
+  controller: Account
   ): Promise<void> {
   
   const store = new Store();
@@ -92,7 +90,6 @@ export async function loadProgram(
   await store.save('config.json', {
     url: urlTls,
     programId: programId.toBase58(),
-    controller: controller.publicKey.toBase58(),
-    mint: mint.publicKey.toBase58(),
+    controller: controller.publicKey.toBase58()
   });
 }

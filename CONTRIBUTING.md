@@ -8,7 +8,7 @@ It'd be so cool to have a growing number of contributors, and you are encouraged
 To give people sovereignty over their data.
 ```
 
-> :high_brightness: The word 'Tyron' derives from the Greek *turannos* that means sovereign
+> :high_brightness: The word tyron derives from the Greek *turannos* that means sovereign
 
 ## Open source software & license
 

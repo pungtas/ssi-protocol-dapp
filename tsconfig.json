@@ -1,9 +1,7 @@
 {
   "compilerOptions": {
-    "types": [
-      "node"
-    ],
-    "target": "esnext",
+    "module": "commonjs",//"esnext",
+    "target": "es5",
     "lib": [
       "dom",
       "dom.iterable",
@@ -15,18 +13,17 @@
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
-    "module": "commonjs",
-
     "moduleResolution": "node",
     "downlevelIteration": true,
     "resolveJsonModule": true,
     "noEmit": true,
     "typeRoots": [
-      "./types"
+      "types",
+      "src/types"
     ],
     "jsx": "react-jsx",
-    "noFallthroughCasesInSwitch": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noFallthroughCasesInSwitch": true
   },
   "include": [
     "src"

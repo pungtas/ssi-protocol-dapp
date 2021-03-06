@@ -54,7 +54,13 @@ export const TokenInstructionLayout: EnumLayout<TokenInstructionLayout> = rustEn
     struct(
       [
         u64('amount'),
-        u8('message')
+        struct(
+          [
+            publicKey('writer'),
+            u8('length'),
+            u8('bytes')
+          ]
+        ),
       ],
       'transfer'
     ),

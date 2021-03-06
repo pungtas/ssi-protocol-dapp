@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
-import { bool, Layout, option, publicKey, u64, u8, struct } from '@project-serum/borsh';
-//import * as BufferLayout from "buffer-layout";
+import { bool, Layout, option, publicKey, u64 } from '@project-serum/borsh';
+import { struct, u8 } from 'buffer-layout';
 
 export interface Mint {
   mintAuthority: PublicKey | null;
@@ -28,25 +28,7 @@ export const Mint: Layout<Mint> = struct([
   bool('initialized'),
 ]);
 
-/**
-export const pubKey = (property = "publicKey"): unknown => {
-  return BufferLayout.blob(32, property);
-};
-
-export const thisTokenAccount: typeof BufferLayout.Structure = BufferLayout.struct(
-  [
-    pubKey('mint'),
-    pubKey('owner'),
-    BufferLayout.u64('amount'),
-    BufferLayout.option(pubKey(), 'delegate'),
-    BufferLayout.u8('state'),
-    BufferLayout.option(u64(), 'delegatedAmount'),
-    BufferLayout.option(pubKey(), 'closeAuthority'),
-  ]
-);
-*/
-
-export const TokenAccountLayout: Layout<TokenAccount> = struct([
+export const AccountLayout: Layout<TokenAccount> = struct([
   publicKey('mint'),
   publicKey('owner'),
   u64('amount'),
@@ -61,5 +43,5 @@ export function decodeMintAccountData(data: Buffer): Mint {
 }
 
 export function decodeTokenAccountData(data: Buffer): TokenAccount {
-  return TokenAccountLayout.decode(data);
+  return AccountLayout.decode(data);
 }

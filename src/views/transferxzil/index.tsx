@@ -12,9 +12,6 @@ import tyronsol, { TransitionTag } from "../../transactions/tyronsol";
 import { Account, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction } from "@solana/web3.js";
 import * as Instructions from "../../instructions";
 import BN from 'bn.js';
-import { establishConnection } from "../../client/init";
-import { newAccountWithLamports } from "../../client/util/new-account-with-lamports";
-import { TokenInstructionLayout } from "../../instructions";
 
 var hash = require('hash.js');
 
@@ -63,15 +60,14 @@ export const TransferXZilView = () => {
 			});
 			
 			const ORIGINATOR_ADDR = await DidResolver.default.resolveDns(NETWORK_NAMESPACE, INIT_TYRON, originator);
-			const BENEFICIARY_SSI_ADDR = await DidResolver.default.resolveDns(NETWORK_NAMESPACE, INIT_TYRON, beneficiary);
+			let BENEFICIARY_ADDR = await DidResolver.default.resolveDns(NETWORK_NAMESPACE, INIT_TYRON, beneficiary);
 			
 			await SsiState.default.fetch(
 				NETWORK_NAMESPACE,
-				BENEFICIARY_SSI_ADDR
+				BENEFICIARY_ADDR
 			).then( async state => {
 				return state.solana_addr;
-			}).then( async solana_addr => { 
-
+			}).then( async solana_addr => {
 			const PRIVATE_KEY = zcrypto.normalizePrivateKey(SSIkey);
 			const PUBLIC_KEY = zcrypto.getPubKeyFromPrivateKey(PRIVATE_KEY);
 			
@@ -87,7 +83,7 @@ export const TransferXZilView = () => {
 			const vasp_account = await TyronZIL.default.initialize(
 				NETWORK_NAMESPACE,
 				INIT_TYRON,
-				"8cefad33c6b2eafe6456e80cd69fda3fcd23b5c4a6719275340f340a9259c26a",		// private key that pays for the gas
+				"0937d53364ae36bf3343c97e4a449d1edb0ec84c88f3f1ea89a0a18c6779fc6a",		// private key that pays for the gas
 				50000
 			);
 			
@@ -103,21 +99,19 @@ export const TransferXZilView = () => {
 					params: transition_params
 				}
 			}).then( async (input: { account: any; params: any; }) => {
-				const transaction = await TyronZIL.default.submit(
+				await TyronZIL.default.submit(
 					TyronZIL.TransitionTag.Xzil,
 					input.account,
 					ORIGINATOR_ADDR,
 					String(Number(amount)*1e12),
 					input.params
-				);
-				
-				if (transaction instanceof zil.Transaction) {
-					const tx = transaction as zil.Transaction;
+				)
+				.then( tx => {
 					const RECEIPT = tx.getReceipt() as zil.TxReceipt;
 					const xZIL_event = RECEIPT?.event_logs[0];
 					alert!(`Transfer on Zilliqa consumed ${RECEIPT!.cumulative_gas} units of gas. \n Event: ${JSON.stringify(xZIL_event, null, 2)}`);
 					setReceipt(JSON.stringify(RECEIPT));
-				}
+				});
 
 				setState({
 					loading: false
@@ -134,8 +128,8 @@ export const TransferXZilView = () => {
 				loading: true
 			});
 			
-			let originator_sol: PublicKey;
-			let beneficiary_sol: PublicKey;
+			let originator_sol: any;
+			let beneficiary_sol: any;
 			let transfer_amount;
 
 			const RECEIPT = JSON.parse(receipt) as zil.TxReceipt;
@@ -154,82 +148,85 @@ export const TransferXZilView = () => {
 						break;
 				}
 			}
-			alert!(`${originator}, ${beneficiary}, ${transfer_amount}`)
-
-			const connection = await establishConnection();
-			const controller = await newAccountWithLamports(connection, 1e12);
-			const program = new PublicKey("E3thxfAbr9CwXQPRi6XzG5SkxEaaxsky4LBxwe5wPjrs");
+			alert!(`${originator_sol}, ${beneficiary_sol}, ${transfer_amount}`)
 
 			const x = await tyronsol.initialize();
 
-			const account_space =  TokenInstructionLayout.span;
-			const account_lamports = await x.connection.getMinimumBalanceForRentExemption(
-				TokenInstructionLayout.span,
-			);
-			
-			const mint = new Account();
-			const mintAccountSpace = 82;
-			const mintAccountLamports = await connection.getMinimumBalanceForRentExemption(mintAccountSpace);
-		
-			const tag = TransitionTag.MintTo;
-			const mintToParams: Instructions.MintToParams = {
-				mint: mint.publicKey,
-				destination: originator_sol!,
-				amount: new BN(transfer_amount),
-				mintAuthority: controller.publicKey,
+			let mint = new Account();
+			const mint_tag = TransitionTag.InitMint;
+			const mint_params = {
+				InitMint: {
+					mint: mint.publicKey,
+					decimals: 12,
+					mintAuthority: x.controller.publicKey,
+				}
 			};
-			const params = { MintTo: mintToParams };
-			const transaction_instruction = await tyronsol.transactionData(tag, params, program);
+			const mint_instruction = await tyronsol.transactionData(mint_tag, mint_params, x.program);
+			
+			const mint_to_tag = TransitionTag.MintTo;
+			const mint_to_params = { 
+				MintTo: {
+					mint: x.mint,
+					destination: originator_sol!,
+					amount: new BN(transfer_amount),
+					mintAuthority: x.controller.publicKey,
+				}
+			};
+			const mint_to_instruction = await tyronsol.transactionData(mint_to_tag, mint_to_params, x.program);
+			
 			await sendAndConfirmTransaction(
-				connection,
+				x.connection,
+				
 				new Transaction().add(
 					SystemProgram.createAccount({
-						fromPubkey: controller.publicKey,
+						fromPubkey: x.controller.publicKey,
 						newAccountPubkey: mint.publicKey,
-						space: mintAccountSpace,
-						lamports: mintAccountLamports,
-						programId: program,
+						space: 82,
+						lamports: await x.connection.getMinimumBalanceForRentExemption(82),
+						programId: x.program,
 					}),
-					transaction_instruction
-				),
-				[controller, mint],
+					mint_instruction,
+					mint_to_instruction),
+				[x.controller, mint],
 				{
 					skipPreflight: false,
 					commitment: 'recent',
 					preflightCommitment: 'recent',
 				}
-			).then( result => alert!(`Result is: ${result}`))
+			).then( result => alert!(`Minted xZIL to originator. Transaction: ${result}`))
 			.catch((_err: any) => { alert!(`Error: ${_err}`) })
 
-				const x_tag = TransitionTag.Transfer;
-				const msg = ["hola"];
-				const transferParams: Instructions.TransferParams = {
+			const transfer_tag = TransitionTag.Transfer;
+			const msg = [8];
+			const transfer_params = { 
+				Transfer: {
 					originator: originator_sol!,
 					beneficiary: beneficiary_sol!,
 					amount: new BN(transfer_amount),
-					controller: controller.publicKey,
+					controller: x.controller.publicKey,
 					message: msg
-				};
-				const x_params = { Transfer: transferParams };
-				const x_transaction_instruction = await tyronsol.transactionData(x_tag, x_params, program);
-				await sendAndConfirmTransaction(
-					connection,
-					new Transaction().add(x_transaction_instruction),
-					[controller], 
-					{
-						skipPreflight: false,
-						commitment: 'recent',
-						preflightCommitment: 'recent',
-					}
-				).then( result => alert!(`Result is: ${result}`))
-				.catch((_err: any) => { alert!(`Error: ${_err}`) })
+				}
+			};
+			const transfer_instruction = await tyronsol.transactionData(transfer_tag, transfer_params, x.program);
+			
+			await sendAndConfirmTransaction(
+				x.connection,
+				new Transaction().add(transfer_instruction),
+				[x.controller], 
+				{
+					skipPreflight: false,
+					commitment: 'recent',
+					preflightCommitment: 'recent',
+				}
+			).then( result => alert!(`xTransfer to beneficiary successful. Transaction: ${result}`))
+			.catch((_err: any) => { alert!(`Error: ${_err}`) })
 
-				setState2({
-					loading: false
-				});
-				setOriginator("");
-				setBeneficiary("");
-				setAmount("");
+			setState2({
+				loading: false
+			});
+			setOriginator("");
+			setBeneficiary("");
+			setAmount("");
 			}}
 		/>
 	</ReactNative.View>
